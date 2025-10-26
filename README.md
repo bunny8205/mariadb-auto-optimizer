@@ -106,8 +106,8 @@ You will see outputs like:
 
 ## 🧑‍💻 Author
 
-**Om Shree (bunny8205)**  
-AWS + MariaDB Hackathon Project — 2024
+**Om Shree Gyanraj(bunny8205)**  
+MariaDB Hackathon Project — 2025
 
 ## 📜 License
 
@@ -115,4 +115,3 @@ This project is licensed under the MIT License.
 Feel free to use, modify, and contribute!
 ```
 
-You can directly copy this into a `README.md` file in your project root! Let me know if you need any adjustments.
