@@ -31,7 +31,7 @@ mariadb-auto-optimizer/
 │── README.md
 │── requirements.txt
 │── setup_demo.py                 → Quick setup script
-```
+
 
 ## 🔧 Installation & Setup
 
