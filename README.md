@@ -1,4 +1,4 @@
-```markdown
+
 # 🚀 MariaDB Auto-Optimizer
 
 **AI-powered SQL Performance Enhancer for MariaDB**
@@ -15,7 +15,7 @@ MariaDB Auto-Optimizer is an intelligent query optimization assistant for MariaD
 
 ## 📂 Project Structure
 
-```
+
 mariadb-auto-optimizer/
 │── data/                         → OpenFlights dataset (Airports, Airlines, Routes)
 │── demo/                         → Jupyter Notebook demo
