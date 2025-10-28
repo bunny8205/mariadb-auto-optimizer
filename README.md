@@ -1,4 +1,3 @@
-Thank you for the correction! I'll update the README to reflect the correct structure with `run_demo.py` in the main repository. Here's the corrected version:
 
 ---
 
