@@ -20,7 +20,7 @@ import warnings
 
 warnings.filterwarnings('ignore', message='.*pandas only supports SQLAlchemy connectable.*')
 
-print("✅ Packages installed and warnings suppressed!")
+print(" Packages installed and warnings suppressed!")
 
 # Import the optimizer and required libraries
 import os
@@ -36,10 +36,10 @@ try:
     from mariadb_autoopt import optimize_once
     from mariadb_autoopt.magic import optimize_and_show
 
-    print("✅ MariaDB Auto-Optimizer imported successfully!")
+    print(" MariaDB Auto-Optimizer imported successfully!")
 except ImportError as e:
-    print(f"⚠️ Could not import mariadb_autoopt: {e}")
-    print("💡 Make sure the package is installed and path is correct")
+    print(f" Could not import mariadb_autoopt: {e}")
+    print(" Make sure the package is installed and path is correct")
 
 import pymysql
 import pandas as pd
@@ -47,7 +47,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import numpy as np
 
-print("✅ Libraries imported successfully!")
+print(" Libraries imported successfully!")
 
 # ---------------------------------------------
 # 🔹 SMART AUTO-OPTIMIZER DECISION ENGINE
@@ -77,7 +77,7 @@ def detect_table_size(conn, table_name="routes"):
         else:
             return "large", rows
     except Exception as e:
-        print(f"⚠️ Could not detect table size: {e}")
+        print(f" Could not detect table size: {e}")
         return "unknown", 0
 
 
@@ -107,7 +107,7 @@ def get_query_cost(conn, query):
                 if cost:
                     return float(cost)
     except Exception as e:
-        print(f"⚠️ Could not get query cost: {e}")
+        print(f" Could not get query cost: {e}")
 
     # Fallback: estimate cost based on table size and query complexity
     size_label, rows = detect_table_size(conn)
@@ -130,22 +130,22 @@ def enhanced_optimization_strategy(conn, query):
     query_type = detect_query_type(query)
     cost = get_query_cost(conn, query)
 
-    print(f"\n📊 Table Size: {rows:,} rows ({size_label})")
-    print(f"🔍 Query Type: {query_type}")
-    print(f"💰 Estimated Query Cost: {cost:.1f}")
+    print(f"\n Table Size: {rows:,} rows ({size_label})")
+    print(f" Query Type: {query_type}")
+    print(f" Estimated Query Cost: {cost:.1f}")
 
     # More conservative strategy
     if size_label == "small" or cost < 50:
-        print("🎓 Mode: Analysis Only (query already efficient)")
+        print(" Mode: Analysis Only (query already efficient)")
         return "analyze_only"
     elif query_type == "join" and rows > 10000:
-        print("🎯 Mode: Join Optimization (focus on foreign keys)")
+        print(" Mode: Join Optimization (focus on foreign keys)")
         return "join_optimize"
     elif query_type == "aggregation" and "GROUP BY" in query.upper():
-        print("📊 Mode: Aggregation Optimization (group by indexes)")
+        print(" Mode: Aggregation Optimization (group by indexes)")
         return "aggregation_optimize"
     elif cost > 1000:
-        print("🔥 Mode: Critical Optimization (high-cost query)")
+        print(" Mode: Critical Optimization (high-cost query)")
         return "critical_optimize"
     else:
         print("⚡ Mode: Selective Optimization (targeted indexes)")
@@ -173,7 +173,7 @@ def get_actual_columns_from_query(conn, query):
         for match in matches:
             table_name, alias = match.groups()
             table_aliases[alias] = table_name
-            print(f"   🔍 Found alias: {alias} → {table_name}")
+            print(f"    Found alias: {alias} → {table_name}")
 
     # Now extract columns with proper table resolution
     column_patterns = [
@@ -210,7 +210,7 @@ def get_actual_columns_from_query(conn, query):
                     actual_table = 'airports'
 
                 actual_columns.append((actual_table, column))
-                print(f"   📍 Column found: {actual_table}.{column}")
+                print(f"    Column found: {actual_table}.{column}")
 
     # Remove duplicates and return
     return list(set(actual_columns))
@@ -221,10 +221,10 @@ def create_smart_indexes(conn, query):
     actual_columns = get_actual_columns_from_query(conn, query)
     created_indexes = []
 
-    print(f"🔍 Found {len(actual_columns)} relevant columns in query")
+    print(f" Found {len(actual_columns)} relevant columns in query")
 
     if not actual_columns:
-        print("   ℹ️ No indexable columns found in query")
+        print("    No indexable columns found in query")
         return created_indexes
 
     # Group columns by table
@@ -243,23 +243,23 @@ def create_smart_indexes(conn, query):
                 cursor.execute(f"SHOW COLUMNS FROM {table}")
                 valid_columns = [row[0] for row in cursor.fetchall()]
                 valid_tables[table] = valid_columns
-                print(f"   ✅ Table {table} has {len(valid_columns)} columns")
+                print(f"    Table {table} has {len(valid_columns)} columns")
             except Exception as e:
-                print(f"   ❌ Table {table} doesn't exist: {e}")
+                print(f"    Table {table} doesn't exist: {e}")
 
     # Create strategic indexes only for valid tables/columns
     for table, columns in columns_by_table.items():
         if table not in valid_tables:
-            print(f"   🚫 Skipping {table} - table not found")
+            print(f"    Skipping {table} - table not found")
             continue
 
         valid_columns = [col for col in columns if col in valid_tables[table]]
 
         if not valid_columns:
-            print(f"   🚫 No valid columns found for table {table}")
+            print(f"   No valid columns found for table {table}")
             continue
 
-        print(f"   🎯 Creating indexes for {table}: {valid_columns}")
+        print(f"    Creating indexes for {table}: {valid_columns}")
 
         # Create composite index for multiple columns
         if len(valid_columns) >= 2:
@@ -271,9 +271,9 @@ def create_smart_indexes(conn, query):
                 with conn.cursor() as cursor:
                     cursor.execute(sql)
                 created_indexes.append(idx_name)
-                print(f"   ✅ Created composite index: {idx_name}")
+                print(f"    Created composite index: {idx_name}")
             except Exception as e:
-                print(f"   ⚠️ Failed to create index {idx_name}: {e}")
+                print(f"   ️ Failed to create index {idx_name}: {e}")
 
         # Also create single-column indexes for important columns
         for column in valid_columns:
@@ -285,9 +285,9 @@ def create_smart_indexes(conn, query):
                     with conn.cursor() as cursor:
                         cursor.execute(sql)
                     created_indexes.append(idx_name)
-                    print(f"   ✅ Created single-column index: {idx_name}")
+                    print(f"    Created single-column index: {idx_name}")
                 except Exception as e:
-                    print(f"   ⚠️ Failed to create index {idx_name}: {e}")
+                    print(f"    Failed to create index {idx_name}: {e}")
 
     return created_indexes
 
@@ -316,9 +316,9 @@ def cleanup_indexes(conn, index_list):
                 if table:
                     with conn.cursor() as cursor:
                         cursor.execute(f"ALTER TABLE {table} DROP INDEX IF EXISTS `{index_spec}`")
-                    print(f"   ✅ Cleaned up: {index_spec}")
+                    print(f"    Cleaned up: {index_spec}")
         except Exception as e:
-            print(f"   ⚠️ Failed to clean up {index_spec}: {e}")
+            print(f"   ️ Failed to clean up {index_spec}: {e}")
 
     conn.commit()
 
@@ -342,7 +342,7 @@ def filter_bad_suggestions(suggestions, query):
 
         good_suggestions.append(suggestion)
 
-    print(f"🚫 Filtered {len(suggestions) - len(good_suggestions)} bad suggestions")
+    print(f" Filtered {len(suggestions) - len(good_suggestions)} bad suggestions")
     return good_suggestions
 
 
@@ -369,7 +369,7 @@ def reuse_learnings(query, current_strategy):
 
     for q_hash, history in query_history.items():
         if history['improvement'] > 15:  # Only reuse strategies that worked well
-            print(f"💡 Past optimization worked ({history['improvement']:.1f}% improvement) — reusing strategy")
+            print(f" Past optimization worked ({history['improvement']:.1f}% improvement) — reusing strategy")
             return history['strategy']
 
     return current_strategy
@@ -393,29 +393,29 @@ def connect_to_database(max_retries=3):
                 connect_timeout=10,
                 charset='utf8mb4'
             )
-            print("✅ Connected to database successfully!")
+            print(" Connected to database successfully!")
 
             # Test the connection and get server info
             with conn.cursor() as cursor:
                 cursor.execute("SELECT VERSION()")
                 version = cursor.fetchone()[0]
-                print(f"📊 Database Version: {version}")
+                print(f" Database Version: {version}")
 
                 # Get server status
                 cursor.execute("SHOW STATUS LIKE 'Uptime'")
                 uptime = cursor.fetchone()[1]
-                print(f"⏰ Server Uptime: {int(uptime) // 3600} hours")
+                print(f" Server Uptime: {int(uptime) // 3600} hours")
 
             return conn
 
         except pymysql.OperationalError as e:
-            print(f"❌ Connection attempt {attempt + 1}/{max_retries} failed: {e}")
+            print(f" Connection attempt {attempt + 1}/{max_retries} failed: {e}")
             if attempt < max_retries - 1:
                 wait_time = 2 ** attempt  # Exponential backoff
-                print(f"⏳ Retrying in {wait_time} seconds...")
+                print(f" Retrying in {wait_time} seconds...")
                 time.sleep(wait_time)
             else:
-                print("\n💡 Troubleshooting tips:")
+                print("\n Troubleshooting tips:")
                 print("   • Check if MariaDB/MySQL is running: sudo systemctl status mysql")
                 print("   • Verify credentials and database exists")
                 print("   • Check firewall settings")
@@ -426,18 +426,18 @@ def connect_to_database(max_retries=3):
 # Connect to database
 conn = connect_to_database()
 if not conn:
-    print("❌ Cannot continue without database connection")
+    print(" Cannot continue without database connection")
     exit(1)
 
 # ✅ STEP 1: LOAD OPENFLIGHTS DATASET
-print("\n📊 LOADING OPENFLIGHTS DATASET")
+print("\n LOADING OPENFLIGHTS DATASET")
 print("=" * 50)
 
 # Set correct path
 data_path = "data/"
 
 # Load .dat files using Pandas
-print("📁 Loading OpenFlights dataset files...")
+print(" Loading OpenFlights dataset files...")
 
 try:
     airports = pd.read_csv(data_path + "airports.dat",
@@ -468,41 +468,41 @@ try:
                          ],
                          na_values="\\N")
 
-    print("✅ OpenFlights dataset loaded successfully!")
-    print(f"📊 Airports: {len(airports):,} records")
-    print(f"📊 Airlines: {len(airlines):,} records")
-    print(f"📊 Routes: {len(routes):,} records")
+    print(" OpenFlights dataset loaded successfully!")
+    print(f"Airports: {len(airports):,} records")
+    print(f" Airlines: {len(airlines):,} records")
+    print(f" Routes: {len(routes):,} records")
 
-    # ✅ CRITICAL FIX: Replace NaN with None (important for MySQL)
+    #  CRITICAL FIX: Replace NaN with None (important for MySQL)
     print("\n🔧 Converting NaN values to None for MySQL compatibility...")
     airports = airports.where(pd.notnull(airports), None)
     airlines = airlines.where(pd.notnull(airlines), None)
     routes = routes.where(pd.notnull(routes), None)
 
-    # ✅ Additional safe string handling
+    #  Additional safe string handling
     airports = airports.astype(object).where(pd.notnull(airports), None)
     airlines = airlines.astype(object).where(pd.notnull(airlines), None)
     routes = routes.astype(object).where(pd.notnull(routes), None)
 
-    print("✅ NaN to None conversion completed!")
+    print(" NaN to None conversion completed!")
 
     # Show sample data
-    print("\n🏢 SAMPLE AIRPORTS DATA:")
+    print("\n SAMPLE AIRPORTS DATA:")
     print(airports.head(3))
 
-    print("\n✈️ SAMPLE AIRLINES DATA:")
+    print("\n SAMPLE AIRLINES DATA:")
     print(airlines.head(3))
 
-    print("\n🛫 SAMPLE ROUTES DATA:")
+    print("\n SAMPLE ROUTES DATA:")
     print(routes.head(3))
 
 except Exception as e:
-    print(f"❌ Error loading OpenFlights dataset: {e}")
-    print("💡 Make sure the data files are in the correct path: ../data/")
+    print(f"Error loading OpenFlights dataset: {e}")
+    print(" Make sure the data files are in the correct path: ../data/")
     exit(1)
 
-# ✅ STEP 2: CREATE MARIA DB TABLES FOR OPENFLIGHTS DATASET
-print("\n🗄️ CREATING MARIA DB TABLES FOR OPENFLIGHTS")
+# STEP 2: CREATE MARIA DB TABLES FOR OPENFLIGHTS DATASET
+print("\n CREATING MARIA DB TABLES FOR OPENFLIGHTS")
 print("=" * 50)
 
 try:
@@ -639,27 +639,27 @@ try:
                            )
                        """)
 
-        print("✅ OpenFlights tables created successfully!")
+        print(" OpenFlights tables created successfully!")
 
 except Exception as e:
-    print(f"❌ Error creating tables: {e}")
+    print(f" Error creating tables: {e}")
     exit(1)
 
-# ✅ STEP 3: INSERT DATA FROM PANDAS → MARIADB
-print("\n📥 INSERTING OPENFLIGHTS DATA INTO MARIA DB")
+#  STEP 3: INSERT DATA FROM PANDAS → MARIADB
+print("\n INSERTING OPENFLIGHTS DATA INTO MARIA DB")
 print("=" * 50)
 
 
 def insert_dataframe_to_table(conn, df, table_name, batch_size=1000):
     """Insert DataFrame data into MariaDB table with batch processing"""
     if df.empty:
-        print(f"⚠️ DataFrame for {table_name} is empty")
+        print(f" DataFrame for {table_name} is empty")
         return 0
 
     try:
         with conn.cursor() as cursor:
             total_rows = len(df)
-            print(f"📤 Inserting {total_rows:,} rows into {table_name}...")
+            print(f" Inserting {total_rows:,} rows into {table_name}...")
 
             # Get column names
             columns = df.columns.tolist()
@@ -681,11 +681,11 @@ def insert_dataframe_to_table(conn, df, table_name, batch_size=1000):
                     print(f"   {min(i + batch_size, total_rows):,}/{total_rows:,} rows inserted...")
 
             conn.commit()
-            print(f"✅ Successfully inserted {inserted_count:,} rows into {table_name}")
+            print(f" Successfully inserted {inserted_count:,} rows into {table_name}")
             return inserted_count
 
     except Exception as e:
-        print(f"❌ Error inserting data into {table_name}: {e}")
+        print(f" Error inserting data into {table_name}: {e}")
         conn.rollback()
         return 0
 
@@ -695,13 +695,13 @@ airports_inserted = insert_dataframe_to_table(conn, airports, "airports")
 airlines_inserted = insert_dataframe_to_table(conn, airlines, "airlines")
 routes_inserted = insert_dataframe_to_table(conn, routes, "routes")
 
-print(f"\n📊 DATA INSERTION SUMMARY:")
-print(f"   🏢 Airports: {airports_inserted:,} rows")
-print(f"   ✈️ Airlines: {airlines_inserted:,} rows")
-print(f"   🛫 Routes: {routes_inserted:,} rows")
+print(f"\n DATA INSERTION SUMMARY:")
+print(f"    Airports: {airports_inserted:,} rows")
+print(f"    Airlines: {airlines_inserted:,} rows")
+print(f"    Routes: {routes_inserted:,} rows")
 
 # Check final table sizes
-print("\n📈 FINAL TABLE SIZES IN DATABASE:")
+print("\n FINAL TABLE SIZES IN DATABASE:")
 for table in ["airports", "airlines", "routes"]:
     try:
         with conn.cursor() as cursor:
@@ -712,8 +712,8 @@ for table in ["airports", "airlines", "routes"]:
         print(f"   {table}: Error - {e}")
 
 # Show data statistics
-print("\n📊 OPENFLIGHTS DATA STATISTICS:")
-print("🏢 AIRPORTS:")
+print("\n OPENFLIGHTS DATA STATISTICS:")
+print(" AIRPORTS:")
 airport_stats = pd.read_sql("""
                             SELECT COUNT(*)                as total_airports,
                                    COUNT(DISTINCT country) as countries,
@@ -722,7 +722,7 @@ airport_stats = pd.read_sql("""
                             """, conn)
 print(airport_stats)
 
-print("✈️ AIRLINES:")
+print(" AIRLINES:")
 airline_stats = pd.read_sql("""
                             SELECT COUNT(*)                                      as total_airlines,
                                    COUNT(DISTINCT country)                       as countries,
@@ -731,7 +731,7 @@ airline_stats = pd.read_sql("""
                             """, conn)
 print(airline_stats)
 
-print("🛫 ROUTES:")
+print(" ROUTES:")
 route_stats = pd.read_sql("""
                           SELECT COUNT(*)                          as total_routes,
                                  COUNT(DISTINCT source_airport_id) as source_airports,
@@ -742,15 +742,15 @@ route_stats = pd.read_sql("""
                           """, conn)
 print(route_stats)
 
-# 🚀 DEFINITIVE WORKING SOLUTION - NO MAGIC REQUIRED
-print("\n" + "🚀" * 20)
-print("🚀 MARIA DB AUTO-OPTIMIZER - OPENFLIGHTS REAL-WORLD DEMO")
-print("🚀" * 20)
+#  DEFINITIVE WORKING SOLUTION - NO MAGIC REQUIRED
+
+print(" MARIA DB AUTO-OPTIMIZER - OPENFLIGHTS REAL-WORLD DEMO")
+
 
 from mariadb_autoopt.core import optimize_once
 
 
-# 🔄 NEW: CACHE CONTROL AND BENCHMARKING FUNCTIONS
+# NEW: CACHE CONTROL AND BENCHMARKING FUNCTIONS
 def clear_database_cache(conn):
     """Clear database cache for consistent benchmarking"""
     try:
@@ -759,9 +759,9 @@ def clear_database_cache(conn):
             cursor.execute("FLUSH TABLES")
             # Reset query cache (if available)
             cursor.execute("RESET QUERY CACHE")
-            print("🧹 Database cache cleared for consistent benchmarking")
+            print(" Database cache cleared for consistent benchmarking")
     except Exception as e:
-        print(f"⚠️ Could not clear cache: {e}")
+        print(f"Could not clear cache: {e}")
 
 
 def run_query_multiple_times(conn, query, num_runs=3, clear_cache=False):
@@ -782,7 +782,7 @@ def run_query_multiple_times(conn, query, num_runs=3, clear_cache=False):
             times.append(execution_time)
             print(f"   Run {i + 1}: {execution_time:.3f}s")
         except Exception as e:
-            print(f"❌ Error in run {i + 1}: {e}")
+            print(f" Error in run {i + 1}: {e}")
             times.append(float('inf'))
 
     if times:
@@ -808,7 +808,7 @@ def get_query_time(conn, query):
             cursor.fetchall()
         return time.time() - start_time
     except Exception as e:
-        print(f"❌ Error executing query: {e}")
+        print(f" Error executing query: {e}")
         return float('inf')
 
 
@@ -820,7 +820,7 @@ def get_query_rows(conn, query):
             results = cursor.fetchall()
             return len(results)
     except Exception as e:
-        print(f"❌ Error counting rows: {e}")
+        print(f" Error counting rows: {e}")
         return 0
 
 
@@ -888,19 +888,19 @@ def create_statistical_comparison(before_stats, after_stats, improvement, rating
 
 def run_smart_optimizer_demo(conn, query, description, optimization_threshold=0.05):
     """Improved optimizer with better validation and adjustable threshold"""
-    print(f"\n🎯 {description}")
+    print(f"\n {description}")
     print("-" * 50)
-    print(f"📝 Query: {query[:100]}..." if len(query) > 100 else f"📝 Query: {query}")
+    print(f" Query: {query[:100]}..." if len(query) > 100 else f"📝 Query: {query}")
 
     # Get baseline performance
-    print(f"\n📊 BASELINE PERFORMANCE:")
+    print(f"\n BASELINE PERFORMANCE:")
     baseline_stats = run_query_multiple_times(conn, query, num_runs=3, clear_cache=True)
 
     if not baseline_stats:
-        print("❌ Baseline benchmark failed")
+        print(" Baseline benchmark failed")
         return None
 
-    print(f"📈 Baseline (median): {baseline_stats['median']:.3f}s")
+    print(f" Baseline (median): {baseline_stats['median']:.3f}s")
 
     # Only optimize if query is slow enough to benefit (adjustable threshold)
     if baseline_stats['median'] < optimization_threshold:  # Now adjustable
@@ -917,7 +917,7 @@ def run_smart_optimizer_demo(conn, query, description, optimization_threshold=0.
     strategy = enhanced_optimization_strategy(conn, query)
 
     if strategy == "analyze_only":
-        print("📋 Analysis only - no indexes created")
+        print(" Analysis only - no indexes created")
         return {
             'before_time': baseline_stats['median'],
             'after_time': baseline_stats['median'],
@@ -927,11 +927,11 @@ def run_smart_optimizer_demo(conn, query, description, optimization_threshold=0.
         }
 
     # Create smart indexes
-    print(f"\n🛠️ Applying {strategy} strategy...")
+    print(f"\n Applying {strategy} strategy...")
     created_indexes = create_smart_indexes(conn, query)
 
     if not created_indexes:
-        print("ℹ️ No relevant indexes to create")
+        print(" No relevant indexes to create")
         return {
             'before_time': baseline_stats['median'],
             'after_time': baseline_stats['median'],
@@ -941,26 +941,26 @@ def run_smart_optimizer_demo(conn, query, description, optimization_threshold=0.
         }
 
     # Test optimized performance
-    print(f"\n📊 OPTIMIZED PERFORMANCE:")
+    print(f"\n OPTIMIZED PERFORMANCE:")
     optimized_stats = run_query_multiple_times(conn, query, num_runs=3, clear_cache=True)
 
     if not optimized_stats:
-        print("❌ Optimized benchmark failed")
+        print(" Optimized benchmark failed")
         # Clean up created indexes
         cleanup_indexes(conn, created_indexes)
         return None
 
-    print(f"📈 Optimized (median): {optimized_stats['median']:.3f}s")
+    print(f" Optimized (median): {optimized_stats['median']:.3f}s")
 
     # Calculate improvement
     improvement = ((baseline_stats['median'] - optimized_stats['median']) / baseline_stats['median']) * 100
 
     # Validate improvement
     if validate_query_improvement(conn, query, baseline_stats['median'], optimized_stats['median']):
-        print(f"✅ VALIDATED: {improvement:.1f}% improvement")
+        print(f" VALIDATED: {improvement:.1f}% improvement")
         keep_indexes = True
     else:
-        print(f"⚠️  INSUFFICIENT: {improvement:.1f}% improvement (below threshold)")
+        print(f"  INSUFFICIENT: {improvement:.1f}% improvement (below threshold)")
         # Roll back indexes
         cleanup_indexes(conn, created_indexes)
         keep_indexes = False
@@ -980,10 +980,10 @@ def run_smart_optimizer_demo(conn, query, description, optimization_threshold=0.
     }
 
 
-# 🧹 STEP 4: DROP EXISTING INDEXES TO SIMULATE UNOPTIMIZED DATABASE
-print("\n" + "🧹" * 20)
-print("🧹 STEP 4: DROPPING EXISTING INDEXES")
-print("🧹" * 20)
+#  STEP 4: DROP EXISTING INDEXES TO SIMULATE UNOPTIMIZED DATABASE
+
+print("STEP 4: DROPPING EXISTING INDEXES")
+
 
 print("Clearing all existing indexes to simulate unoptimized database...")
 try:
@@ -1000,23 +1000,22 @@ try:
             indexes_to_drop = [row[0] for row in cursor.fetchall()]
 
             if indexes_to_drop:
-                print(f"🗑️  Dropping {len(indexes_to_drop)} indexes from {table}: {', '.join(indexes_to_drop)}")
+                print(f"  Dropping {len(indexes_to_drop)} indexes from {table}: {', '.join(indexes_to_drop)}")
                 for index_name in indexes_to_drop:
                     cursor.execute(f"ALTER TABLE {table} DROP INDEX IF EXISTS `{index_name}`")
             else:
-                print(f"✅ No existing indexes found on {table} (perfect for demo!)")
+                print(f" No existing indexes found on {table} (perfect for demo!)")
 
         conn.commit()
-        print("✅ All existing indexes removed!")
+        print(" All existing indexes removed!")
 
 except Exception as e:
     print(f"⚠️ Could not drop indexes: {e}")
     print("Continuing with demo...")
 
 # DEMO 1: Complex aggregation with multiple joins
-print("\n" + "🔍" * 20)
-print("🔍 DEMO 1: COMPLEX AGGREGATION WITH MULTIPLE JOINS")
-print("🔍" * 20)
+
+print("DEMO 1: COMPLEX AGGREGATION WITH MULTIPLE JOINS")
 
 query1 = """
          SELECT a.country, \
@@ -1038,9 +1037,9 @@ query1 = """
 result1 = run_smart_optimizer_demo(conn, query1, "Complex aggregation with multiple joins", optimization_threshold=0.01)
 
 # DEMO 2: Large dataset analysis with subquery
-print("\n" + "⚡" * 20)
-print("⚡ DEMO 2: LARGE DATASET ANALYSIS WITH SUBQUERY")
-print("⚡" * 20)
+
+print("DEMO 2: LARGE DATASET ANALYSIS WITH SUBQUERY")
+
 
 query2 = """
          SELECT al.name                               as airline_name, \
@@ -1064,9 +1063,9 @@ query2 = """
 result2 = run_smart_optimizer_demo(conn, query2, "Large dataset analysis with subquery", optimization_threshold=0.01)
 
 # DEMO 3: Cross-table analysis with complex filtering
-print("\n" + "📊" * 20)
-print("📊 DEMO 3: CROSS-TABLE ANALYSIS WITH COMPLEX FILTERING")
-print("📊" * 20)
+
+print(" DEMO 3: CROSS-TABLE ANALYSIS WITH COMPLEX FILTERING")
+
 
 query3 = """
          SELECT src.country                  as source_country, \
@@ -1093,11 +1092,10 @@ result3 = run_smart_optimizer_demo(conn, query3, "Cross-table analysis with comp
                                    optimization_threshold=0.01)
 
 # DEMO 4: Check created indexes
-print("\n" + "🗂️" * 20)
-print("🗂️ DEMO 4: INTELLIGENT INDEX MANAGEMENT")
-print("🗂️" * 20)
 
-print("📊 Indexes created by smart auto-optimizer:")
+print("DEMO 4: INTELLIGENT INDEX MANAGEMENT")
+
+print(" Indexes created by smart auto-optimizer:")
 all_indexes = pd.read_sql("""
                           SELECT TABLE_NAME,
                                  INDEX_NAME,
@@ -1116,16 +1114,16 @@ all_indexes = pd.read_sql("""
                           """, conn)
 
 if all_indexes.empty:
-    print("❌ No indexes created yet.")
-    print("💡 All queries were either too fast or optimizations didn't meet threshold")
+    print(" No indexes created yet.")
+    print(" All queries were either too fast or optimizations didn't meet threshold")
 else:
-    print(f"✅ Found {len(all_indexes)} intelligently created indexes:")
+    print(f" Found {len(all_indexes)} intelligently created indexes:")
     print(all_indexes)
 
 # DEMO 5: Performance comparison
-print("\n" + "📈" * 20)
-print("📈 DEMO 5: OVERALL PERFORMANCE SUMMARY")
-print("📈" * 20)
+
+print(" DEMO 5: OVERALL PERFORMANCE SUMMARY")
+
 
 # Calculate overall improvement
 results = [result1, result2, result3]
@@ -1135,7 +1133,7 @@ if valid_results:
     total_improvement = sum(r['improvement'] for r in valid_results)
     avg_improvement = total_improvement / len(valid_results)
 
-    print("📊 OVERALL OPTIMIZATION RESULTS:")
+    print(" OVERALL OPTIMIZATION RESULTS:")
     print(f"   • Successful optimizations: {len(valid_results)}/{len(results)}")
     print(f"   • Average improvement: {avg_improvement:.1f}%")
 
@@ -1154,21 +1152,21 @@ if valid_results:
     print(f"   • Performance Rating: {rating}")
 
     # Show individual results
-    print("\n📋 INDIVIDUAL QUERY RESULTS:")
+    print("\nINDIVIDUAL QUERY RESULTS:")
     for i, result in enumerate(results, 1):
         if result:
             if result.get('skipped'):
                 print(f"   Query {i}: SKIPPED (already fast)")
             elif result.get('kept_indexes'):
-                print(f"   Query {i}: ✅ {result['improvement']:.1f}% improvement")
+                print(f"   Query {i}:  {result['improvement']:.1f}% improvement")
             else:
-                print(f"   Query {i}: ❌ {result['improvement']:.1f}% improvement (below threshold)")
+                print(f"   Query {i}: {result['improvement']:.1f}% improvement (below threshold)")
 else:
-    print("ℹ️ No successful optimizations to compare")
-    print("💡 All queries were either too fast or optimizations didn't meet threshold")
+    print("No successful optimizations to compare")
+    print(" All queries were either too fast or optimizations didn't meet threshold")
 
 # Show final database stats
-print("\n📊 FINAL OPENFLIGHTS DATABASE STATISTICS:")
+print("\n FINAL OPENFLIGHTS DATABASE STATISTICS:")
 final_stats = pd.read_sql("""
                           SELECT (SELECT COUNT(*) FROM routes)                            as total_routes,
                                  (SELECT COUNT(*) FROM airports)                          as total_airports,
@@ -1185,16 +1183,16 @@ final_stats = pd.read_sql("""
 print(final_stats)
 
 # Show optimization summary with learning insights
-print("\n🎯 OPTIMIZATION STRATEGY SUMMARY:")
+print("\n OPTIMIZATION STRATEGY SUMMARY:")
 size_label, rows = detect_table_size(conn, "routes")
-print(f"📊 Routes Table Size: {rows:,} rows ({size_label})")
-print(f"💾 Query Cache: {len(query_cache)} queries cached")
-print(f"🧠 Learning History: {len(query_history)} queries learned")
+print(f" Routes Table Size: {rows:,} rows ({size_label})")
+print(f" Query Cache: {len(query_cache)} queries cached")
+print(f" Learning History: {len(query_history)} queries learned")
 
 if 'avg_improvement' in locals():
     print(f"⚡ Average Performance Improvement: {avg_improvement:.1f}%")
 
-print("\n📊 BENCHMARKING METHODOLOGY:")
+print("\n BENCHMARKING METHODOLOGY:")
 print("   • Each query run 3 times for statistical accuracy")
 print("   • Database cache cleared between benchmark sets")
 print("   • Median times used for comparison (resistant to outliers)")
@@ -1204,7 +1202,7 @@ print("   • Complex queries designed to benefit from optimization")
 
 # Close database connection
 conn.close()
-print("✅ Database connection closed.")
-print("\n🎊 OPENFLIGHTS REAL-WORLD DEMO COMPLETED SUCCESSFULLY!")
-print("🎉 Thank you for using MariaDB Auto-Optimizer!")
-print("📈 Now with fixed table alias resolution and validated index creation! 🚀")
+print(" Database connection closed.")
+print("\n OPENFLIGHTS REAL-WORLD DEMO COMPLETED SUCCESSFULLY!")
+print(" Thank you for using MariaDB Auto-Optimizer!")
+print(" Now with fixed table alias resolution and validated index creation! 🚀")
