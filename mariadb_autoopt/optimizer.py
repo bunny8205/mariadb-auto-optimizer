@@ -98,3 +98,28 @@ def explanation_from_issues(issues, suggestions):
         lines.append("\n❓ No specific index suggestions available. Consider reviewing query structure.")
 
     return "\n".join(lines)
+
+
+def optimize_query(query: str) -> str:
+    """
+    Wrapper for Streamlit demo.
+    Analyzes the query, suggests optimizations,
+    and returns the same query (since optimizer is advisory).
+    """
+    try:
+        # Run analysis
+        suggestions = suggest_indexes(query)
+
+        # Create a header comment showing optimization suggestions
+        comment_block = "/* AUTOOPTIMIZER SUGGESTIONS:\n"
+        for s in suggestions:
+            comment_block += f"   {s}\n"
+        comment_block += "*/\n"
+
+        # Return original query with embedded suggestions as comment
+        optimized_query = comment_block + query
+        return optimized_query
+
+    except Exception as e:
+        print(f"[Error in optimize_query] {e}")
+        return query
