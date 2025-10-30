@@ -16,7 +16,7 @@
 
 ## 🎥 Video Demonstration
 📌 **Watch the complete demo video here:**  
-➡️ **YouTube:** *MariaDB Auto-Optimizer Demo*  
+➡️ **YouTube:** [*MariaDB Auto-Optimizer Demo* ](https://youtu.be/Qlvg1dCffz4) 
 
 ---
 
