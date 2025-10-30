@@ -31,20 +31,12 @@ def get_connection():
             database=DB_NAME, 
             ssl={'ssl': {}},
             connect_timeout=10,
-            autocommit=True
+            autocommit=True  # Better transaction handling
         )
         return conn
     except Exception as e:
         st.error(f"❌ Database connection failed: {e}")
         return None
-
-def safe_close_connection(conn):
-    """Safely close connection without raising errors"""
-    try:
-        if conn and hasattr(conn, 'open') and conn.open:
-            conn.close()
-    except:
-        pass
 
 def clear_database_cache(conn):
     """Clear database cache for consistent benchmarking"""
@@ -84,29 +76,12 @@ def run_query_with_timing(conn, query, num_runs=3):
         }
     return None
 
-def get_actual_columns_from_query(query):
-    """Enhanced column extraction with table alias resolution"""
-    actual_columns = []
+def create_smart_indexes_for_query(conn, query):
+    """Create indexes based on actual query patterns (fixed alias handling)"""
+    created_indexes = []
     query_lower = query.lower()
-
-    # Map table aliases to real table names
-    table_aliases = {}
-
-    # Pattern to find table aliases
-    alias_patterns = [
-        r'from\s+(\w+)\s+(\w+)',
-        r'join\s+(\w+)\s+(\w+)',
-        r'from\s+(\w+)\s+as\s+(\w+)',
-        r'join\s+(\w+)\s+as\s+(\w+)'
-    ]
-
-    for pattern in alias_patterns:
-        matches = re.finditer(pattern, query_lower)
-        for match in matches:
-            table_name, alias = match.groups()
-            table_aliases[alias] = table_name
-
-    # Extract columns with proper table resolution
+    
+    # Extract columns from query using regex patterns
     column_patterns = [
         r'where\s+(\w+)\.(\w+)\s*[=<>!]',
         r'join\s+\w+\s+on\s+(\w+)\.(\w+)\s*=\s*\w+\.\w+',
@@ -114,47 +89,41 @@ def get_actual_columns_from_query(query):
         r'order by\s+(\w+)\.(\w+)',
         r'on\s+(\w+)\.(\w+)\s*=\s*\w+\.\w+'
     ]
-
+    
+    actual_columns = []
     for pattern in column_patterns:
         matches = re.finditer(pattern, query_lower)
         for match in matches:
-            table_ref, column = match.groups()
-
-            # Resolve alias to real table name
-            actual_table = table_aliases.get(table_ref, table_ref)
-
-            # Map common aliases to real tables
-            if actual_table == 'r':
-                actual_table = 'routes'
-            elif actual_table == 'a':
-                actual_table = 'airports'
-            elif actual_table == 'al':
-                actual_table = 'airlines'
-            elif actual_table == 'src':
-                actual_table = 'airports'
-            elif actual_table == 'dest':
-                actual_table = 'airports'
-
-            # Only include real tables
-            if actual_table in ['routes', 'airports', 'airlines']:
-                actual_columns.append((actual_table, column))
-
-    # Remove duplicates and return
-    return list(set(actual_columns))
-
-def create_smart_indexes_for_query(conn, query):
-    """Create indexes based on actual query patterns with validation"""
-    created_indexes = []
+            table, column = match.groups()
+            
+            # Map common aliases to real tables (IGNORE subquery aliases like r2, r3)
+            if table in ['r', 'routes']:
+                table = 'routes'
+            elif table in ['a', 'airports']:
+                table = 'airports'
+            elif table in ['al', 'airlines']:
+                table = 'airlines'
+            elif table in ['src', 'source']:
+                table = 'airports'
+            elif table in ['dest', 'destination']:
+                table = 'airports'
+            # Skip subquery aliases (r2, r3, etc.) - they don't represent real tables
+            elif table in ['r2', 'r3', 'r4', 'r5']:
+                continue
+            else:
+                # If it's not a recognized alias, assume it's a real table name
+                if table not in ['routes', 'airports', 'airlines']:
+                    continue
+                
+            actual_columns.append((table, column))
     
-    # Get columns from query
-    actual_columns = get_actual_columns_from_query(query)
+    # Remove duplicates
+    actual_columns = list(set(actual_columns))
     
-    if not actual_columns:
-        st.info("No indexable columns found in query")
-        return created_indexes
-
-    st.info(f"🔍 Found indexable columns: {actual_columns}")
-
+    # Show what columns were found
+    if actual_columns:
+        st.info(f"🔍 Found indexable columns: {actual_columns}")
+    
     # Group columns by table
     columns_by_table = {}
     for table, column in actual_columns:
@@ -162,36 +131,18 @@ def create_smart_indexes_for_query(conn, query):
             columns_by_table[table] = []
         if column not in columns_by_table[table]:
             columns_by_table[table].append(column)
-
-    # Validate tables exist and get their actual columns
-    valid_tables = {}
-    with conn.cursor() as cursor:
-        for table in columns_by_table.keys():
-            try:
-                cursor.execute(f"SHOW COLUMNS FROM {table}")
-                valid_columns = [row[0] for row in cursor.fetchall()]
-                valid_tables[table] = valid_columns
-            except Exception as e:
-                st.warning(f"Table {table} doesn't exist: {e}")
-
-    # Create strategic indexes only for valid tables/columns
+    
+    # Create indexes for each table
     for table, columns in columns_by_table.items():
-        if table not in valid_tables:
-            st.warning(f"Skipping {table} - table not found")
+        if not columns:
             continue
-
-        valid_columns = [col for col in columns if col in valid_tables[table]]
-
-        if not valid_columns:
-            st.warning(f"No valid columns found for table {table}")
-            continue
-
+            
         st.write(f"**Creating indexes for table `{table}`:**")
-
-        # Create composite index for multiple columns (more effective)
-        if len(valid_columns) >= 2:
-            idx_name = f"idx_{table}_composite_{'_'.join(valid_columns[:2])}"
-            composite_cols = ', '.join(valid_columns[:2])
+        
+        # Create composite index for multiple columns
+        if len(columns) >= 2:
+            idx_name = f"idx_{table}_composite_{'_'.join(columns[:2])}"
+            composite_cols = ', '.join(columns[:2])
             sql = f"CREATE INDEX {idx_name} ON {table} ({composite_cols})"
             
             try:
@@ -202,10 +153,10 @@ def create_smart_indexes_for_query(conn, query):
             except Exception as e:
                 if "Duplicate key name" not in str(e):
                     st.warning(f"Failed to create index {idx_name}: {e}")
-
+        
         # Create single-column indexes for important columns
-        for column in valid_columns:
-            # Focus on columns that typically benefit from indexing
+        for column in columns:
+            # Only create single indexes for columns that benefit from them
             if column in ['country', 'city', 'active', 'airline_id', 'source_airport_id', 'dest_airport_id', 'stops', 'name']:
                 idx_name = f"idx_{table}_{column}"
                 sql = f"CREATE INDEX {idx_name} ON {table} ({column})"
@@ -218,15 +169,12 @@ def create_smart_indexes_for_query(conn, query):
                 except Exception as e:
                     if "Duplicate key name" not in str(e):
                         st.warning(f"Failed to create index {idx_name}: {e}")
-
+    
     return created_indexes
 
 def display_performance_comparison(baseline_stats, optimized_stats):
     """Display performance comparison with visual indicators"""
-    if baseline_stats['median'] > 0:
-        improvement = ((baseline_stats['median'] - optimized_stats['median']) / baseline_stats['median']) * 100
-    else:
-        improvement = 0
+    improvement = ((baseline_stats['median'] - optimized_stats['median']) / baseline_stats['median']) * 100
     
     col1, col2, col3 = st.columns([1, 1, 1])
     
@@ -272,12 +220,9 @@ def display_performance_comparison(baseline_stats, optimized_stats):
     elif improvement > 5:
         rating = "👍 GOOD!"
         color = "blue"
-    elif improvement > 0:
+    else:
         rating = "⚡ MINIMAL"
         color = "gray"
-    else:
-        rating = "📉 REGRESSION"
-        color = "red"
     
     st.write(f"**Performance Rating:** :{color}[{rating}]")
     
@@ -315,21 +260,13 @@ def cleanup_indexes(conn, index_list):
         except Exception as e:
             st.warning(f"Failed to clean up {index_spec}: {e}")
 
-def check_existing_indexes(conn):
-    """Check what indexes already exist"""
+def safe_close_connection(conn):
+    """Safely close connection without raising errors"""
     try:
-        with conn.cursor() as cursor:
-            cursor.execute("""
-                SELECT TABLE_NAME, INDEX_NAME, COLUMN_NAME
-                FROM information_schema.STATISTICS
-                WHERE TABLE_SCHEMA = %s 
-                AND TABLE_NAME IN ('routes', 'airports', 'airlines')
-                AND INDEX_NAME != 'PRIMARY'
-            """, (DB_NAME,))
-            return cursor.fetchall()
-    except Exception as e:
-        st.warning(f"Could not check existing indexes: {e}")
-        return []
+        if conn and conn.open:
+            conn.close()
+    except:
+        pass  # Ignore any errors during close
 
 # --- Demo Queries ---
 DEMO_QUERIES = {
@@ -628,19 +565,11 @@ if run_comparison or show_suggestions:
                 st.info("No optimization suggestions for this query.")
         
         if run_comparison:
-            # Show existing indexes first
-            existing_indexes = check_existing_indexes(conn)
-            if existing_indexes:
-                with st.expander("🔍 Existing Indexes (may affect results)"):
-                    st.write("These indexes already exist in the database:")
-                    for table, index, column in existing_indexes:
-                        st.write(f"- `{table}.{index}` on `{column}`")
-            
             # Run full comparison with ACTUAL index creation
             st.subheader("📊 Real Performance Comparison")
             
             # Step 1: Baseline performance
-            with st.spinner("Running baseline performance (without new indexes)..."):
+            with st.spinner("Running baseline performance (without indexes)..."):
                 clear_database_cache(conn)
                 baseline_stats = run_query_with_timing(conn, query, num_runs=3)
                 
@@ -656,12 +585,13 @@ if run_comparison or show_suggestions:
                 created_indexes = create_smart_indexes_for_query(conn, query)
                 
                 if not created_indexes:
-                    st.warning("No new indexes created for this query")
+                    st.warning("No indexes created for this query")
+                    # Continue to show baseline results only
                     st.info("Showing baseline results only - no optimization performed")
                     st.stop()
             
             # Step 3: Optimized performance
-            with st.spinner("Running optimized performance (with new indexes)..."):
+            with st.spinner("Running optimized performance (with indexes)..."):
                 clear_database_cache(conn)
                 optimized_stats = run_query_with_timing(conn, query, num_runs=3)
                 
@@ -672,10 +602,10 @@ if run_comparison or show_suggestions:
                         cleanup_indexes(conn, created_indexes)
                     st.stop()
             
-            # Step 4: Display results
+            # Step 4: Display results using the new comparison function
             display_performance_comparison(baseline_stats, optimized_stats)
             
-            # Step 5: Show created indexes and ask user what to do
+            # Step 5: Show created indexes
             st.subheader("🔧 Created Indexes")
             if created_indexes:
                 for idx in created_indexes:
