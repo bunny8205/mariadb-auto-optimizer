@@ -8,6 +8,8 @@ import os
 import sys
 import re
 import warnings
+import requests
+import io
 
 # Suppress pandas warnings
 warnings.filterwarnings('ignore', message='.*pandas only supports SQLAlchemy connectable.*')
@@ -363,66 +365,74 @@ def check_data_volume(conn):
     
     return table_counts
 
-def load_openflights_data(conn):
-    """Load COMPLETE OpenFlights dataset like run_demo.py"""
+def download_openflights_data():
+    """Download the complete OpenFlights dataset from GitHub"""
+    base_url = "https://raw.githubusercontent.com/jpatokal/openflights/master/data/"
+    datasets = {
+        "airports": f"{base_url}airports.dat",
+        "airlines": f"{base_url}airlines.dat", 
+        "routes": f"{base_url}routes.dat"
+    }
+    
+    data = {}
+    for name, url in datasets.items():
+        try:
+            st.write(f"📥 Downloading {name} dataset...")
+            response = requests.get(url)
+            response.raise_for_status()
+            
+            # Read into pandas
+            if name == "airports":
+                df = pd.read_csv(io.StringIO(response.text), header=None, names=[
+                    "airport_id", "name", "city", "country", "iata", "icao", 
+                    "latitude", "longitude", "altitude", "timezone", "dst", 
+                    "tz_database_time_zone", "type", "source"
+                ], na_values="\\N")
+            elif name == "airlines":
+                df = pd.read_csv(io.StringIO(response.text), header=None, names=[
+                    "airline_id", "name", "alias", "iata", "icao", "callsign", 
+                    "country", "active"
+                ], na_values="\\N")
+            elif name == "routes":
+                df = pd.read_csv(io.StringIO(response.text), header=None, names=[
+                    "airline", "airline_id", "source_airport", "source_airport_id",
+                    "dest_airport", "dest_airport_id", "codeshare", "stops", "equipment"
+                ], na_values="\\N")
+            
+            # Convert NaN to None for MySQL
+            df = df.where(pd.notnull(df), None)
+            df = df.astype(object).where(pd.notnull(df), None)
+            
+            data[name] = df
+            st.success(f"✅ Downloaded {name}: {len(df):,} records")
+            
+        except Exception as e:
+            st.error(f"❌ Failed to download {name}: {e}")
+            return None
+    
+    return data
+
+def load_complete_openflights_data(conn):
+    """Load COMPLETE OpenFlights dataset with ALL data"""
     try:
-        # Set data path - adjust as needed for your Streamlit deployment
-        data_path = "data/"  # You may need to adjust this path
+        st.write("## 🗂️ Loading Complete OpenFlights Dataset")
+        st.write("This will download and load the FULL OpenFlights dataset with:")
+        st.write("- 🌍 7,000+ airports worldwide")
+        st.write("- ✈️ 6,000+ airlines") 
+        st.write("- 🛣️ 67,000+ flight routes")
+        st.write("This may take 1-2 minutes...")
         
-        st.write("📥 Loading OpenFlights dataset files...")
+        # Download data
+        data = download_openflights_data()
+        if not data:
+            st.error("❌ Failed to download OpenFlights data")
+            return False
         
-        # Load .dat files using Pandas (EXACTLY like run_demo.py)
-        airports = pd.read_csv(data_path + "airports.dat",
-                               header=None,
-                               names=[
-                                   "airport_id", "name", "city", "country",
-                                   "iata", "icao", "latitude", "longitude",
-                                   "altitude", "timezone", "dst", "tz_database_time_zone",
-                                   "type", "source"
-                               ],
-                               na_values="\\N")
-
-        airlines = pd.read_csv(data_path + "airlines.dat",
-                               header=None,
-                               names=[
-                                   "airline_id", "name", "alias", "iata",
-                                   "icao", "callsign", "country", "active"
-                               ],
-                               na_values="\\N")
-
-        routes = pd.read_csv(data_path + "routes.dat",
-                             header=None,
-                             names=[
-                                 "airline", "airline_id", "source_airport",
-                                 "source_airport_id", "dest_airport",
-                                 "dest_airport_id", "codeshare",
-                                 "stops", "equipment"
-                             ],
-                             na_values="\\N")
-
-        st.success("✅ OpenFlights dataset loaded successfully!")
-        st.write(f"- Airports: {len(airports):,} records")
-        st.write(f"- Airlines: {len(airlines):,} records") 
-        st.write(f"- Routes: {len(routes):,} records")
-
-        # CRITICAL FIX: Replace NaN with None (important for MySQL) - EXACTLY like run_demo.py
-        st.write("🔧 Converting NaN values to None for MySQL compatibility...")
-        airports = airports.where(pd.notnull(airports), None)
-        airlines = airlines.where(pd.notnull(airlines), None)
-        routes = routes.where(pd.notnull(routes), None)
-
-        # Additional safe string handling
-        airports = airports.astype(object).where(pd.notnull(airports), None)
-        airlines = airlines.astype(object).where(pd.notnull(airlines), None)
-        routes = routes.astype(object).where(pd.notnull(routes), None)
-
-        st.success("✅ NaN to None conversion completed!")
-
-        # Create tables (EXACTLY like run_demo.py)
+        # Create tables
         with conn.cursor() as cursor:
             # Drop existing tables if they exist
             cursor.execute("DROP TABLE IF EXISTS routes, airports, airlines")
-
+            
             # Create airports table
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS airports (
@@ -442,7 +452,7 @@ def load_openflights_data(conn):
                     source VARCHAR(50)
                 )
             """)
-
+            
             # Create airlines table
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS airlines (
@@ -456,7 +466,7 @@ def load_openflights_data(conn):
                     active VARCHAR(5)
                 )
             """)
-
+            
             # Create routes table
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS routes (
@@ -472,12 +482,11 @@ def load_openflights_data(conn):
                     equipment VARCHAR(255)
                 )
             """)
-
-        st.success("✅ OpenFlights tables created successfully!")
-
-        # Insert data using batch processing (EXACTLY like run_demo.py)
+        
+        st.success("✅ Tables created successfully!")
+        
+        # Insert data with batch processing
         def insert_dataframe_to_table(conn, df, table_name, batch_size=1000):
-            """Insert DataFrame data into MariaDB table with batch processing"""
             if df.empty:
                 st.warning(f"DataFrame for {table_name} is empty")
                 return 0
@@ -497,19 +506,21 @@ def load_openflights_data(conn):
                     # Batch insert for performance
                     inserted_count = 0
                     progress_bar = st.progress(0)
+                    
                     for i in range(0, total_rows, batch_size):
                         batch = df.iloc[i:i + batch_size]
                         batch_data = [tuple(row) for row in batch.itertuples(index=False)]
-
-                        cursor.executemany(insert_sql, batch_data)
-                        inserted_count += len(batch_data)
+                        
+                        try:
+                            cursor.executemany(insert_sql, batch_data)
+                            inserted_count += len(batch_data)
+                        except Exception as e:
+                            st.warning(f"Batch insert warning: {e}")
+                            # Continue with next batch
 
                         # Update progress
                         progress = min(i + batch_size, total_rows) / total_rows
                         progress_bar.progress(progress)
-
-                        if i + batch_size < total_rows:
-                            st.write(f"   {min(i + batch_size, total_rows):,}/{total_rows:,} rows inserted...")
 
                     conn.commit()
                     st.success(f"✅ Successfully inserted {inserted_count:,} rows into {table_name}")
@@ -520,23 +531,21 @@ def load_openflights_data(conn):
                 conn.rollback()
                 return 0
 
-        # Insert all three datasets
-        st.write("🗂️ Inserting data into database...")
-        airports_inserted = insert_dataframe_to_table(conn, airports, "airports")
-        airlines_inserted = insert_dataframe_to_table(conn, airlines, "airlines")
-        routes_inserted = insert_dataframe_to_table(conn, routes, "routes")
+        # Insert all datasets
+        airports_inserted = insert_dataframe_to_table(conn, data["airports"], "airports")
+        airlines_inserted = insert_dataframe_to_table(conn, data["airlines"], "airlines") 
+        routes_inserted = insert_dataframe_to_table(conn, data["routes"], "routes")
 
-        st.success("🎉 OpenFlights data loaded successfully!")
-        st.write(f"**Data Insertion Summary:**")
+        st.success("🎉 Complete OpenFlights dataset loaded successfully!")
+        st.write("**Final Data Volume:**")
         st.write(f"- Airports: {airports_inserted:,} rows")
-        st.write(f"- Airlines: {airlines_inserted:,} rows") 
+        st.write(f"- Airlines: {airlines_inserted:,} rows")
         st.write(f"- Routes: {routes_inserted:,} rows")
-
+        
         return True
 
     except Exception as e:
         st.error(f"❌ Error loading OpenFlights dataset: {e}")
-        st.info("💡 Make sure the data files are in the correct path: data/")
         return False
 
 # --- Demo Queries ---
@@ -602,7 +611,7 @@ DEMO_QUERIES = {
 # --- Streamlit UI ---
 st.set_page_config(page_title="MariaDB Auto-Optimizer Demo", layout="wide")
 st.title("⚙️ MariaDB Auto-Optimizer — Complete OpenFlights Demo")
-st.caption("Uses COMPLETE OpenFlights dataset with real index optimization like local demo")
+st.caption("Uses COMPLETE OpenFlights dataset with 67,000+ routes for real performance testing")
 
 # --- Database Setup Section ---
 st.sidebar.header("Database Setup")
@@ -634,26 +643,33 @@ try:
 finally:
     safe_close_connection(conn)
 
-if not db_ready:
-    st.warning("⚠️ Database tables not found. Please load the complete OpenFlights dataset first.")
-    if st.sidebar.button("🔄 Load Complete OpenFlights Dataset"):
-        conn = get_connection()
-        if conn:
-            try:
-                with st.spinner("Loading COMPLETE OpenFlights dataset (this may take a minute)..."):
-                    if load_openflights_data(conn):
-                        st.success("✅ Complete OpenFlights dataset loaded successfully!")
-                        st.rerun()
-                    else:
-                        st.error("❌ Failed to load OpenFlights dataset")
-            finally:
-                safe_close_connection(conn)
-else:
-    st.sidebar.success("✅ Database ready with OpenFlights data!")
-    # Show data volume in sidebar
-    st.sidebar.write("**Data Volume:**")
+# Show current data volume
+if db_ready and table_counts:
+    st.sidebar.write("**Current Data Volume:**")
     for table, count in table_counts.items():
         st.sidebar.write(f"- {table}: {count:,} rows")
+    
+    # Check if we have sufficient data
+    if table_counts.get('routes', 0) < 10000:
+        st.sidebar.warning("⚠️ Limited data detected. Load full dataset for better results.")
+        load_full_data = st.sidebar.button("🔄 Load Complete OpenFlights Dataset")
+    else:
+        st.sidebar.success("✅ Full dataset loaded!")
+        load_full_data = False
+else:
+    load_full_data = st.sidebar.button("🔄 Load Complete OpenFlights Dataset")
+
+if load_full_data:
+    conn = get_connection()
+    if conn:
+        try:
+            if load_complete_openflights_data(conn):
+                st.success("✅ Complete OpenFlights dataset loaded successfully!")
+                st.rerun()
+            else:
+                st.error("❌ Failed to load OpenFlights dataset")
+        finally:
+            safe_close_connection(conn)
 
 # --- Query Selection ---
 st.sidebar.header("Query Selection")
@@ -845,20 +861,19 @@ st.sidebar.info(
 with st.sidebar.expander("🔧 Optimization Strategy"):
     st.write("""
     **Complete OpenFlights Demo:**
-    - ✅ Loads ALL OpenFlights data (airports.dat, airlines.dat, routes.dat)
-    - ✅ Drops ALL indexes before each run (like local demo)
+    - ✅ Downloads FULL OpenFlights data from GitHub
+    - ✅ 7,000+ airports, 6,000+ airlines, 67,000+ routes
+    - ✅ Drops ALL indexes before each run
     - ✅ Uses 10ms optimization threshold
     - ✅ 10% improvement validation
-    - ✅ Batch data insertion with progress
     
-    **Smart Optimization Features:**
-    - ✅ Table alias resolution
-    - ✅ Composite index creation  
-    - ✅ Single-column indexes for key columns
-    - ✅ Automatic index cleanup
-    
-    **Expected Results:**
+    **Expected Performance:**
     - Complex queries: 50-90% improvement
     - Medium queries: 20-50% improvement  
     - Fast queries: Minimal improvement
+    
+    **Data Sources:**
+    - airports.dat: 7,000+ records
+    - airlines.dat: 6,000+ records
+    - routes.dat: 67,000+ records
     """)
