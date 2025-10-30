@@ -1,20 +1,88 @@
+🚀 MariaDB Auto-Optimizer
+https://img.shields.io/badge/License-MIT-blue.svg
+https://img.shields.io/badge/Python-3.8%252B-brightgreen.svg
+https://img.shields.io/badge/MariaDB-10.5%252B-orange.svg
+https://img.shields.io/badge/Jupyter-Notebook-orange.svg
+https://img.shields.io/badge/Streamlit-App-red.svg
 
----
+AI-powered SQL Performance Enhancer with Adaptive Learning for MariaDB
 
-# 🚀 MariaDB Auto-Optimizer
+MariaDB Auto-Optimizer is an intelligent query optimization assistant that automatically analyzes SQL queries, detects performance bottlenecks, and recommends improvements using machine learning and adaptive strategies — delivering 40-80% performance gains for real-world datasets.
 
-![License](https://img.shields.io/badge/License-MIT-blue.svg)
-![Python](https://img.shields.io/badge/Python-3.8%2B-brightgreen.svg)
-![MariaDB](https://img.shields.io/badge/MariaDB-10.5%2B-orange.svg)
-![Jupyter](https://img.shields.io/badge/Jupyter-Notebook-orange.svg)
-
-**AI-powered SQL Performance Enhancer with Adaptive Learning for MariaDB**
-
-MariaDB Auto-Optimizer is an intelligent query optimization assistant that automatically analyzes SQL queries, detects performance bottlenecks, and recommends improvements using machine learning and adaptive strategies — delivering **40-80% performance gains** for real-world datasets.
-
-## 🎥 Video Demonstration
+🎥 Video Demonstration
 📌 Watch the complete demo video here:
-➡️ YouTube: [MariaDB Auto-Optimizer Demo](https://youtu.be/your-demo-link-here)
+➡️ YouTube: MariaDB Auto-Optimizer Demo
+
+🌐 Live Streamlit Demo
+🚀 Experience the optimizer in your browser:
+➡️ MariaDB Auto-Optimizer Streamlit App
+
+✨ Streamlit Demo Features
+🖥️ Web-Based Interface - No installation required, runs directly in browser
+
+📊 Real-Time Optimization - See performance improvements instantly
+
+🔧 Interactive Query Testing - Test your own SQL queries or use pre-built examples
+
+📈 Visual Performance Metrics - Beautiful charts showing before/after comparisons
+
+⚡ Live Database Connection - Connects to real MariaDB SkySQL cloud database
+
+🎯 Smart Index Management - Creates and validates indexes with one click
+
+🎮 Streamlit Demo Steps
+Step 1: Access the Demo
+Visit: https://mariadb-auto-optimizer-jwdqkjm38sthdbrzhzcp4t.streamlit.app/
+
+The app loads automatically - no login required!
+
+Step 2: Initialize Database (One-Time Setup)
+Click "🔄 Initialize Database" in the sidebar
+
+Wait for the complete OpenFlights dataset to load (7,000+ airports, 6,000+ airlines, 67,000+ routes)
+
+See real-time progress as data loads
+
+Step 3: Run Optimization
+Choose a demo query from the sidebar dropdown:
+
+Complex Aggregation - Multi-table JOINs with GROUP BY
+
+Large Dataset Analysis - Subqueries and aggregations
+
+Cross-Table Analysis - Complex filtering across multiple tables
+
+Click "🚀 Run Real Optimization" to:
+
+Drop all existing indexes (clean simulation)
+
+Measure baseline performance
+
+Create intelligent indexes
+
+Measure optimized performance
+
+Show detailed comparison
+
+Step 4: Analyze Results
+📊 Performance Metrics - Before/after execution times
+
+📈 Improvement Percentage - Visual percentage gains
+
+🔧 Created Indexes - See exactly which indexes were created
+
+🎯 Performance Rating - Get optimization quality assessment
+
+Step 5: Advanced Features
+💡 Show Suggestions Only - Get index recommendations without execution
+
+🧹 Clear All Indexes - Reset database to unoptimized state
+
+📊 Show Current Indexes - View all existing indexes
+
+✏️ Custom Queries - Paste your own SQL for optimization
+
+
 
 ## ✨ Revolutionary Features
 
