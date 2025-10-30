@@ -8,7 +8,7 @@
 
 ---
 
-### 💡 AI-powered SQL Performance Enhancer with Adaptive Learning for MariaDB
+### 💡 Smart SQL Performance Enhancer with Adaptive Learning for MariaDB
 
 **MariaDB Auto-Optimizer** is an intelligent query optimization assistant that automatically analyzes SQL queries, detects performance bottlenecks, and recommends improvements using machine learning and adaptive strategies — delivering **40–80% performance gains** for real-world datasets.
 
