@@ -7,6 +7,10 @@ import time
 import os
 import sys
 import re
+import warnings
+
+# Suppress pandas warnings
+warnings.filterwarnings('ignore', message='.*pandas only supports SQLAlchemy connectable.*')
 
 # Add the parent directory to path to import your optimizer
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -99,6 +103,36 @@ def validate_improvement(baseline_time, optimized_time, threshold=0.10):
         return False
     improvement = (baseline_time - optimized_time) / baseline_time
     return improvement >= threshold
+
+def drop_all_indexes(conn):
+    """Drop all existing indexes to simulate unoptimized database (like run_demo.py)"""
+    try:
+        with conn.cursor() as cursor:
+            # Drop indexes from all OpenFlights tables
+            for table in ["routes", "airports", "airlines"]:
+                cursor.execute(f"""
+                    SELECT INDEX_NAME
+                    FROM information_schema.STATISTICS
+                    WHERE TABLE_SCHEMA = %s
+                    AND TABLE_NAME = %s
+                    AND INDEX_NAME != 'PRIMARY'
+                """, (DB_NAME, table))
+                indexes_to_drop = [row[0] for row in cursor.fetchall()]
+
+                if indexes_to_drop:
+                    st.info(f"  Dropping {len(indexes_to_drop)} indexes from {table}: {', '.join(indexes_to_drop)}")
+                    for index_name in indexes_to_drop:
+                        cursor.execute(f"ALTER TABLE {table} DROP INDEX IF EXISTS `{index_name}`")
+                else:
+                    st.info(f" No existing indexes found on {table} (perfect for demo!)")
+
+            conn.commit()
+            st.success("✅ All existing indexes removed!")
+            return True
+
+    except Exception as e:
+        st.error(f"❌ Could not drop indexes: {e}")
+        return False
 
 def create_smart_indexes_for_query(conn, query):
     """Enhanced index creation matching your local demo"""
@@ -329,92 +363,66 @@ def check_data_volume(conn):
     
     return table_counts
 
-# --- Demo Queries ---
-DEMO_QUERIES = {
-    "Simple Count": "SELECT COUNT(*) as total_airports FROM airports;",
-    "Complex Aggregation": """
-        SELECT a.country, 
-               a.city, 
-               COUNT(*) as total_routes, 
-               COUNT(DISTINCT r.airline_id) as unique_airlines, 
-               AVG(r.stops) as avg_stops
-        FROM routes r
-        JOIN airports a ON r.source_airport_id = a.airport_id
-        JOIN airlines al ON r.airline_id = al.airline_id
-        WHERE a.country IN ('United States', 'China', 'Germany', 'United Kingdom', 'France')
-          AND al.active = 'Y'
-          AND r.stops <= 2
-        GROUP BY a.country, a.city
-        HAVING total_routes > 1
-        ORDER BY total_routes DESC 
-        LIMIT 10;
-    """,
-    "Large Dataset Analysis": """
-        SELECT al.name as airline_name, 
-               al.country, 
-               COUNT(*) as total_routes, 
-               (SELECT COUNT(*) 
-                FROM routes r2 
-                WHERE r2.airline_id = al.airline_id 
-                  AND r2.stops = 0) as direct_routes, 
-               (SELECT COUNT(DISTINCT r3.dest_airport_id) 
-                FROM routes r3 
-                WHERE r3.airline_id = al.airline_id) as unique_destinations
-        FROM routes r
-        JOIN airlines al ON r.airline_id = al.airline_id
-        WHERE al.active = 'Y'
-        GROUP BY al.airline_id, al.name, al.country
-        HAVING total_routes > 1
-        ORDER BY total_routes DESC 
-        LIMIT 10;
-    """,
-    "Cross-Table Analysis": """
-        SELECT src.country as source_country, 
-               dest.country as dest_country, 
-               COUNT(*) as route_count, 
-               COUNT(DISTINCT r.airline_id) as airlines_operating, 
-               MIN(r.stops) as min_stops, 
-               MAX(r.stops) as max_stops
-        FROM routes r
-        JOIN airports src ON r.source_airport_id = src.airport_id
-        JOIN airports dest ON r.dest_airport_id = dest.airport_id
-        JOIN airlines al ON r.airline_id = al.airline_id
-        WHERE src.country != dest.country
-          AND al.active = 'Y'
-          AND src.country IN ('United States', 'China', 'Germany')
-          AND dest.country IN ('United Kingdom', 'France', 'Japan', 'Australia')
-        GROUP BY src.country, dest.country
-        HAVING route_count > 0
-        ORDER BY route_count DESC
-        LIMIT 10;
-    """
-}
-
-# --- Streamlit UI ---
-st.set_page_config(page_title="MariaDB Auto-Optimizer Demo", layout="wide")
-st.title("⚙️ MariaDB Auto-Optimizer — Real Performance Comparison")
-st.caption("Run queries below to compare Normal vs Optimized Execution with ACTUAL index creation")
-
-# --- Database Setup Section ---
-st.sidebar.header("Database Setup")
-
-def check_database_tables(conn):
-    """Check if required tables exist"""
+def load_openflights_data(conn):
+    """Load COMPLETE OpenFlights dataset like run_demo.py"""
     try:
-        with conn.cursor() as cursor:
-            cursor.execute("""
-                SELECT COUNT(*) FROM information_schema.tables 
-                WHERE table_schema = %s AND table_name IN ('airports', 'airlines', 'routes')
-            """, (DB_NAME,))
-            return cursor.fetchone()[0] == 3
-    except Exception as e:
-        st.error(f"Error checking tables: {e}")
-        return False
+        # Set data path - adjust as needed for your Streamlit deployment
+        data_path = "data/"  # You may need to adjust this path
+        
+        st.write("📥 Loading OpenFlights dataset files...")
+        
+        # Load .dat files using Pandas (EXACTLY like run_demo.py)
+        airports = pd.read_csv(data_path + "airports.dat",
+                               header=None,
+                               names=[
+                                   "airport_id", "name", "city", "country",
+                                   "iata", "icao", "latitude", "longitude",
+                                   "altitude", "timezone", "dst", "tz_database_time_zone",
+                                   "type", "source"
+                               ],
+                               na_values="\\N")
 
-def setup_database_tables(conn):
-    """Set up the required database tables"""
-    try:
+        airlines = pd.read_csv(data_path + "airlines.dat",
+                               header=None,
+                               names=[
+                                   "airline_id", "name", "alias", "iata",
+                                   "icao", "callsign", "country", "active"
+                               ],
+                               na_values="\\N")
+
+        routes = pd.read_csv(data_path + "routes.dat",
+                             header=None,
+                             names=[
+                                 "airline", "airline_id", "source_airport",
+                                 "source_airport_id", "dest_airport",
+                                 "dest_airport_id", "codeshare",
+                                 "stops", "equipment"
+                             ],
+                             na_values="\\N")
+
+        st.success("✅ OpenFlights dataset loaded successfully!")
+        st.write(f"- Airports: {len(airports):,} records")
+        st.write(f"- Airlines: {len(airlines):,} records") 
+        st.write(f"- Routes: {len(routes):,} records")
+
+        # CRITICAL FIX: Replace NaN with None (important for MySQL) - EXACTLY like run_demo.py
+        st.write("🔧 Converting NaN values to None for MySQL compatibility...")
+        airports = airports.where(pd.notnull(airports), None)
+        airlines = airlines.where(pd.notnull(airlines), None)
+        routes = routes.where(pd.notnull(routes), None)
+
+        # Additional safe string handling
+        airports = airports.astype(object).where(pd.notnull(airports), None)
+        airlines = airlines.astype(object).where(pd.notnull(airlines), None)
+        routes = routes.astype(object).where(pd.notnull(routes), None)
+
+        st.success("✅ NaN to None conversion completed!")
+
+        # Create tables (EXACTLY like run_demo.py)
         with conn.cursor() as cursor:
+            # Drop existing tables if they exist
+            cursor.execute("DROP TABLE IF EXISTS routes, airports, airlines")
+
             # Create airports table
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS airports (
@@ -434,7 +442,7 @@ def setup_database_tables(conn):
                     source VARCHAR(50)
                 )
             """)
-            
+
             # Create airlines table
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS airlines (
@@ -448,7 +456,7 @@ def setup_database_tables(conn):
                     active VARCHAR(5)
                 )
             """)
-            
+
             # Create routes table
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS routes (
@@ -464,96 +472,152 @@ def setup_database_tables(conn):
                     equipment VARCHAR(255)
                 )
             """)
-            
-            conn.commit()
-            return True
+
+        st.success("✅ OpenFlights tables created successfully!")
+
+        # Insert data using batch processing (EXACTLY like run_demo.py)
+        def insert_dataframe_to_table(conn, df, table_name, batch_size=1000):
+            """Insert DataFrame data into MariaDB table with batch processing"""
+            if df.empty:
+                st.warning(f"DataFrame for {table_name} is empty")
+                return 0
+
+            try:
+                with conn.cursor() as cursor:
+                    total_rows = len(df)
+                    st.write(f"Inserting {total_rows:,} rows into {table_name}...")
+
+                    # Get column names
+                    columns = df.columns.tolist()
+                    placeholders = ', '.join(['%s'] * len(columns))
+                    column_names = ', '.join(columns)
+
+                    insert_sql = f"INSERT IGNORE INTO {table_name} ({column_names}) VALUES ({placeholders})"
+
+                    # Batch insert for performance
+                    inserted_count = 0
+                    progress_bar = st.progress(0)
+                    for i in range(0, total_rows, batch_size):
+                        batch = df.iloc[i:i + batch_size]
+                        batch_data = [tuple(row) for row in batch.itertuples(index=False)]
+
+                        cursor.executemany(insert_sql, batch_data)
+                        inserted_count += len(batch_data)
+
+                        # Update progress
+                        progress = min(i + batch_size, total_rows) / total_rows
+                        progress_bar.progress(progress)
+
+                        if i + batch_size < total_rows:
+                            st.write(f"   {min(i + batch_size, total_rows):,}/{total_rows:,} rows inserted...")
+
+                    conn.commit()
+                    st.success(f"✅ Successfully inserted {inserted_count:,} rows into {table_name}")
+                    return inserted_count
+
+            except Exception as e:
+                st.error(f"Error inserting data into {table_name}: {e}")
+                conn.rollback()
+                return 0
+
+        # Insert all three datasets
+        st.write("🗂️ Inserting data into database...")
+        airports_inserted = insert_dataframe_to_table(conn, airports, "airports")
+        airlines_inserted = insert_dataframe_to_table(conn, airlines, "airlines")
+        routes_inserted = insert_dataframe_to_table(conn, routes, "routes")
+
+        st.success("🎉 OpenFlights data loaded successfully!")
+        st.write(f"**Data Insertion Summary:**")
+        st.write(f"- Airports: {airports_inserted:,} rows")
+        st.write(f"- Airlines: {airlines_inserted:,} rows") 
+        st.write(f"- Routes: {routes_inserted:,} rows")
+
+        return True
+
     except Exception as e:
-        st.error(f"Error creating tables: {e}")
+        st.error(f"❌ Error loading OpenFlights dataset: {e}")
+        st.info("💡 Make sure the data files are in the correct path: data/")
         return False
 
-def load_sample_data(conn):
-    """Load comprehensive sample data for better optimization results"""
+# --- Demo Queries ---
+DEMO_QUERIES = {
+    "Complex Aggregation": """
+        SELECT a.country, 
+               a.city, 
+               COUNT(*) as total_routes, 
+               COUNT(DISTINCT r.airline_id) as unique_airlines, 
+               AVG(r.stops) as avg_stops
+        FROM routes r
+        JOIN airports a ON r.source_airport_id = a.airport_id
+        JOIN airlines al ON r.airline_id = al.airline_id
+        WHERE a.country IN ('United States', 'China', 'Germany', 'United Kingdom', 'France')
+          AND al.active = 'Y'
+          AND r.stops <= 2
+        GROUP BY a.country, a.city
+        HAVING total_routes > 5
+        ORDER BY total_routes DESC 
+        LIMIT 50;
+    """,
+    "Large Dataset Analysis": """
+        SELECT al.name as airline_name, 
+               al.country, 
+               COUNT(*) as total_routes, 
+               (SELECT COUNT(*) 
+                FROM routes r2 
+                WHERE r2.airline_id = al.airline_id 
+                  AND r2.stops = 0) as direct_routes, 
+               (SELECT COUNT(DISTINCT r3.dest_airport_id) 
+                FROM routes r3 
+                WHERE r3.airline_id = al.airline_id) as unique_destinations
+        FROM routes r
+        JOIN airlines al ON r.airline_id = al.airline_id
+        WHERE al.active = 'Y'
+        GROUP BY al.airline_id, al.name, al.country
+        HAVING total_routes > 20
+        ORDER BY total_routes DESC 
+        LIMIT 30;
+    """,
+    "Cross-Table Analysis": """
+        SELECT src.country as source_country, 
+               dest.country as dest_country, 
+               COUNT(*) as route_count, 
+               COUNT(DISTINCT r.airline_id) as airlines_operating, 
+               MIN(r.stops) as min_stops, 
+               MAX(r.stops) as max_stops
+        FROM routes r
+        JOIN airports src ON r.source_airport_id = src.airport_id
+        JOIN airports dest ON r.dest_airport_id = dest.airport_id
+        JOIN airlines al ON r.airline_id = al.airline_id
+        WHERE src.country != dest.country
+          AND al.active = 'Y'
+          AND src.country IN ('United States', 'China', 'Germany')
+          AND dest.country IN ('United Kingdom', 'France', 'Japan', 'Australia')
+        GROUP BY src.country, dest.country
+        HAVING route_count > 10
+        ORDER BY route_count DESC
+        LIMIT 25;
+    """
+}
+
+# --- Streamlit UI ---
+st.set_page_config(page_title="MariaDB Auto-Optimizer Demo", layout="wide")
+st.title("⚙️ MariaDB Auto-Optimizer — Complete OpenFlights Demo")
+st.caption("Uses COMPLETE OpenFlights dataset with real index optimization like local demo")
+
+# --- Database Setup Section ---
+st.sidebar.header("Database Setup")
+
+def check_database_tables(conn):
+    """Check if required tables exist"""
     try:
         with conn.cursor() as cursor:
-            # Clear existing data
-            cursor.execute("DELETE FROM routes")
-            cursor.execute("DELETE FROM airlines")
-            cursor.execute("DELETE FROM airports")
-            
-            # Insert comprehensive sample airports (more data for better optimization)
             cursor.execute("""
-                INSERT IGNORE INTO airports (airport_id, name, city, country, iata, icao) VALUES
-                (1, 'John F Kennedy International', 'New York', 'United States', 'JFK', 'KJFK'),
-                (2, 'Los Angeles International', 'Los Angeles', 'United States', 'LAX', 'KLAX'),
-                (3, 'Heathrow Airport', 'London', 'United Kingdom', 'LHR', 'EGLL'),
-                (4, 'Charles de Gaulle Airport', 'Paris', 'France', 'CDG', 'LFPG'),
-                (5, 'Frankfurt Airport', 'Frankfurt', 'Germany', 'FRA', 'EDDF'),
-                (6, 'Tokyo Haneda Airport', 'Tokyo', 'Japan', 'HND', 'RJTT'),
-                (7, 'Sydney Airport', 'Sydney', 'Australia', 'SYD', 'YSSY'),
-                (8, 'Beijing Capital International', 'Beijing', 'China', 'PEK', 'ZBAA'),
-                (9, 'Chicago O''Hare International', 'Chicago', 'United States', 'ORD', 'KORD'),
-                (10, 'Dubai International', 'Dubai', 'United Arab Emirates', 'DXB', 'OMDB'),
-                (11, 'Hong Kong International', 'Hong Kong', 'China', 'HKG', 'VHHH'),
-                (12, 'Singapore Changi', 'Singapore', 'Singapore', 'SIN', 'WSSS'),
-                (13, 'Incheon International', 'Seoul', 'South Korea', 'ICN', 'RKSI'),
-                (14, 'Amsterdam Schiphol', 'Amsterdam', 'Netherlands', 'AMS', 'EHAM'),
-                (15, 'Madrid Barajas', 'Madrid', 'Spain', 'MAD', 'LEMD'),
-                (16, 'Munich Airport', 'Munich', 'Germany', 'MUC', 'EDDM'),
-                (17, 'Rome Fiumicino', 'Rome', 'Italy', 'FCO', 'LIRF'),
-                (18, 'Zurich Airport', 'Zurich', 'Switzerland', 'ZRH', 'LSZH'),
-                (19, 'Vienna International', 'Vienna', 'Austria', 'VIE', 'LOWW'),
-                (20, 'Brussels Airport', 'Brussels', 'Belgium', 'BRU', 'EBBR')
-            """)
-            
-            # Insert comprehensive sample airlines
-            cursor.execute("""
-                INSERT IGNORE INTO airlines (airline_id, name, country, active, iata, icao) VALUES
-                (1, 'American Airlines', 'United States', 'Y', 'AA', 'AAL'),
-                (2, 'Delta Air Lines', 'United States', 'Y', 'DL', 'DAL'),
-                (3, 'British Airways', 'United Kingdom', 'Y', 'BA', 'BAW'),
-                (4, 'Air France', 'France', 'Y', 'AF', 'AFR'),
-                (5, 'Lufthansa', 'Germany', 'Y', 'LH', 'DLH'),
-                (6, 'Japan Airlines', 'Japan', 'Y', 'JL', 'JAL'),
-                (7, 'Qantas', 'Australia', 'Y', 'QF', 'QFA'),
-                (8, 'Air China', 'China', 'Y', 'CA', 'CCA'),
-                (9, 'Emirates', 'United Arab Emirates', 'Y', 'EK', 'UAE'),
-                (10, 'United Airlines', 'United States', 'Y', 'UA', 'UAL'),
-                (11, 'Singapore Airlines', 'Singapore', 'Y', 'SQ', 'SIA'),
-                (12, 'Cathay Pacific', 'Hong Kong', 'Y', 'CX', 'CPA'),
-                (13, 'Korean Air', 'South Korea', 'Y', 'KE', 'KAL'),
-                (14, 'Turkish Airlines', 'Turkey', 'Y', 'TK', 'THY'),
-                (15, 'Air Canada', 'Canada', 'Y', 'AC', 'ACA'),
-                (16, 'Qatar Airways', 'Qatar', 'Y', 'QR', 'QTR'),
-                (17, 'ANA All Nippon Airways', 'Japan', 'Y', 'NH', 'ANA'),
-                (18, 'Ethiopian Airlines', 'Ethiopia', 'Y', 'ET', 'ETH'),
-                (19, 'Swiss International', 'Switzerland', 'Y', 'LX', 'SWR'),
-                (20, 'KLM Royal Dutch', 'Netherlands', 'Y', 'KL', 'KLM')
-            """)
-            
-            # Insert comprehensive sample routes (more routes for better optimization)
-            cursor.execute("""
-                INSERT IGNORE INTO routes (airline_id, source_airport_id, dest_airport_id, stops) VALUES
-                (1, 1, 3, 0), (1, 1, 4, 0), (1, 2, 3, 1), (1, 2, 6, 0), (1, 1, 5, 0), (1, 2, 8, 0),
-                (2, 1, 5, 0), (2, 2, 6, 1), (2, 9, 3, 0), (2, 9, 4, 0), (2, 2, 7, 0), (2, 1, 10, 0),
-                (3, 3, 1, 0), (3, 3, 2, 0), (3, 3, 7, 1), (3, 3, 8, 0), (3, 3, 9, 0), (3, 3, 11, 0),
-                (4, 4, 1, 0), (4, 4, 8, 0), (4, 4, 9, 1), (4, 4, 12, 0), (4, 4, 13, 0), (4, 4, 14, 0),
-                (5, 5, 2, 0), (5, 5, 6, 0), (5, 5, 10, 0), (5, 5, 15, 0), (5, 5, 16, 0), (5, 5, 17, 0),
-                (6, 6, 3, 1), (6, 6, 7, 0), (6, 6, 9, 0), (6, 6, 18, 0), (6, 6, 19, 0), (6, 6, 20, 0),
-                (7, 7, 1, 1), (7, 7, 4, 0), (7, 7, 5, 0), (7, 7, 11, 0), (7, 7, 12, 0), (7, 7, 13, 0),
-                (8, 8, 2, 0), (8, 8, 5, 0), (8, 8, 10, 1), (8, 8, 14, 0), (8, 8, 15, 0), (8, 8, 16, 0),
-                (9, 10, 1, 0), (9, 10, 3, 0), (9, 10, 6, 0), (9, 10, 17, 0), (9, 10, 18, 0), (9, 10, 19, 0),
-                (10, 9, 4, 0), (10, 9, 7, 1), (10, 9, 8, 0), (10, 9, 20, 0), (10, 9, 11, 0), (10, 9, 12, 0),
-                (11, 12, 1, 0), (11, 12, 3, 0), (11, 12, 6, 0), (11, 12, 8, 0), (11, 12, 13, 0), (11, 12, 14, 0),
-                (12, 11, 2, 0), (12, 11, 5, 0), (12, 11, 7, 0), (12, 11, 9, 0), (12, 11, 15, 0), (12, 11, 16, 0),
-                (13, 13, 1, 0), (13, 13, 4, 0), (13, 13, 10, 0), (13, 13, 17, 0), (13, 13, 18, 0), (13, 13, 19, 0),
-                (14, 14, 2, 0), (14, 14, 6, 0), (14, 14, 8, 0), (14, 14, 20, 0), (14, 14, 11, 0), (14, 14, 12, 0),
-                (15, 15, 3, 0), (15, 15, 7, 0), (15, 15, 9, 0), (15, 15, 13, 0), (15, 15, 14, 0), (15, 15, 16, 0)
-            """)
-
-            conn.commit()
-            return True
+                SELECT COUNT(*) FROM information_schema.tables 
+                WHERE table_schema = %s AND table_name IN ('airports', 'airlines', 'routes')
+            """, (DB_NAME,))
+            return cursor.fetchone()[0] == 3
     except Exception as e:
-        st.error(f"Error loading sample data: {e}")
+        st.error(f"Error checking tables: {e}")
         return False
 
 # Check database status
@@ -571,21 +635,21 @@ finally:
     safe_close_connection(conn)
 
 if not db_ready:
-    st.warning("⚠️ Database tables not found. Please initialize the database first.")
-    if st.sidebar.button("🔄 Initialize Database"):
+    st.warning("⚠️ Database tables not found. Please load the complete OpenFlights dataset first.")
+    if st.sidebar.button("🔄 Load Complete OpenFlights Dataset"):
         conn = get_connection()
         if conn:
             try:
-                with st.spinner("Setting up database tables and loading comprehensive sample data..."):
-                    if setup_database_tables(conn) and load_sample_data(conn):
-                        st.success("✅ Database initialized successfully with comprehensive sample data!")
+                with st.spinner("Loading COMPLETE OpenFlights dataset (this may take a minute)..."):
+                    if load_openflights_data(conn):
+                        st.success("✅ Complete OpenFlights dataset loaded successfully!")
                         st.rerun()
                     else:
-                        st.error("❌ Failed to initialize database")
+                        st.error("❌ Failed to load OpenFlights dataset")
             finally:
                 safe_close_connection(conn)
 else:
-    st.sidebar.success("✅ Database ready!")
+    st.sidebar.success("✅ Database ready with OpenFlights data!")
     # Show data volume in sidebar
     st.sidebar.write("**Data Volume:**")
     for table, count in table_counts.items():
@@ -614,21 +678,7 @@ if clear_indexes:
     conn = get_connection()
     if conn:
         try:
-            # Drop all non-primary indexes
-            with conn.cursor() as cursor:
-                for table in ["routes", "airports", "airlines"]:
-                    cursor.execute(f"""
-                        SELECT INDEX_NAME 
-                        FROM information_schema.STATISTICS 
-                        WHERE TABLE_SCHEMA = %s 
-                        AND TABLE_NAME = %s 
-                        AND INDEX_NAME != 'PRIMARY'
-                    """, (DB_NAME, table))
-                    indexes = [row[0] for row in cursor.fetchall()]
-                    for index in indexes:
-                        cursor.execute(f"ALTER TABLE {table} DROP INDEX IF EXISTS `{index}`")
-            conn.commit()
-            st.success("✅ All indexes cleared!")
+            drop_all_indexes(conn)
             st.rerun()
         except Exception as e:
             st.error(f"Error clearing indexes: {e}")
@@ -638,7 +688,7 @@ if clear_indexes:
 # Main execution logic
 if run_comparison or show_suggestions:
     if not db_ready:
-        st.error("❌ Please initialize the database first using the sidebar button.")
+        st.error("❌ Please load the complete OpenFlights dataset first using the sidebar button.")
         st.stop()
     
     conn = get_connection()
@@ -661,15 +711,21 @@ if run_comparison or show_suggestions:
             # Run full comparison with ACTUAL index creation
             st.subheader("📊 Real Performance Comparison")
             
+            # STEP 1: DROP ALL EXISTING INDEXES (EXACTLY like run_demo.py)
+            st.write("**🔧 Step 1: Preparing Database**")
+            with st.spinner("Dropping all existing indexes to simulate unoptimized database..."):
+                drop_all_indexes(conn)
+            
             # Check if optimization is worthwhile
-            st.write("**🔍 Pre-optimization Analysis**")
-            if not should_optimize_query(conn, query, threshold_seconds=0.05):
-                st.warning("⚡ Query is already fast (< 50ms) - optimization may not provide significant benefits")
-                proceed_anyway = st.checkbox("Proceed with optimization anyway")
+            st.write("**🔍 Step 2: Pre-optimization Analysis**")
+            if not should_optimize_query(conn, query, threshold_seconds=0.01):  # 10ms threshold like local demo
+                st.warning("⚡ Query is already fast (< 10ms) - optimization may not provide significant benefits")
+                proceed_anyway = st.checkbox("Proceed with optimization anyway", value=True)
                 if not proceed_anyway:
                     st.stop()
             
-            # Step 1: Baseline performance
+            # Step 3: Baseline performance
+            st.write("**📊 Step 3: Baseline Performance**")
             with st.spinner("Running baseline performance (without indexes)..."):
                 clear_database_cache(conn)
                 baseline_stats = run_query_with_timing(conn, query, num_runs=3)
@@ -680,8 +736,8 @@ if run_comparison or show_suggestions:
                 
                 st.write(f"**Baseline Performance (median):** {baseline_stats['median']:.3f}s")
             
-            # Step 2: Create indexes
-            created_indexes = []
+            # Step 4: Create indexes
+            st.write("**🔧 Step 4: Creating Optimized Indexes**")
             with st.spinner("Creating optimized indexes..."):
                 created_indexes = create_smart_indexes_for_query(conn, query)
                 
@@ -691,7 +747,8 @@ if run_comparison or show_suggestions:
                     st.info("Showing baseline results only - no optimization performed")
                     st.stop()
             
-            # Step 3: Optimized performance
+            # Step 5: Optimized performance
+            st.write("**📊 Step 5: Optimized Performance**")
             with st.spinner("Running optimized performance (with indexes)..."):
                 clear_database_cache(conn)
                 optimized_stats = run_query_with_timing(conn, query, num_runs=3)
@@ -703,7 +760,7 @@ if run_comparison or show_suggestions:
                         cleanup_indexes(conn, created_indexes)
                     st.stop()
             
-            # Step 4: Validate improvement
+            # Step 6: Validate improvement
             improvement_validated = validate_improvement(
                 baseline_stats['median'], 
                 optimized_stats['median'], 
@@ -719,10 +776,11 @@ if run_comparison or show_suggestions:
                 else:
                     st.error(f"📉 Performance regression ({abs(improvement):.1f}% slower) - indexes will be cleaned up")
             
-            # Step 5: Display results
+            # Step 7: Display results
+            st.write("**📈 Step 6: Performance Comparison**")
             display_performance_comparison(baseline_stats, optimized_stats, improvement_validated)
             
-            # Step 6: Show created indexes and handle cleanup
+            # Step 8: Show created indexes and handle cleanup
             st.subheader("🔧 Created Indexes")
             if created_indexes:
                 for idx in created_indexes:
@@ -778,24 +836,29 @@ if st.sidebar.button("📊 Show Current Indexes"):
 # --- Performance Summary ---
 st.sidebar.header("About")
 st.sidebar.info(
-    "This demo shows real performance improvements by creating optimized indexes "
-    "for your SQL queries. The system analyzes query patterns and creates strategic "
-    "indexes to speed up execution."
+    "This demo uses the COMPLETE OpenFlights dataset with real performance "
+    "optimization. The system drops all indexes before each run and creates "
+    "strategic indexes based on query patterns."
 )
 
 # --- Optimization Strategy Info ---
 with st.sidebar.expander("🔧 Optimization Strategy"):
     st.write("""
+    **Complete OpenFlights Demo:**
+    - ✅ Loads ALL OpenFlights data (airports.dat, airlines.dat, routes.dat)
+    - ✅ Drops ALL indexes before each run (like local demo)
+    - ✅ Uses 10ms optimization threshold
+    - ✅ 10% improvement validation
+    - ✅ Batch data insertion with progress
+    
     **Smart Optimization Features:**
     - ✅ Table alias resolution
     - ✅ Composite index creation  
     - ✅ Single-column indexes for key columns
-    - ✅ 10% improvement threshold
     - ✅ Automatic index cleanup
-    - ✅ Data volume awareness
     
-    **Optimized Columns:**
-    - country, city, active, airline_id
-    - source_airport_id, dest_airport_id
-    - stops, name, airport_id
+    **Expected Results:**
+    - Complex queries: 50-90% improvement
+    - Medium queries: 20-50% improvement  
+    - Fast queries: Minimal improvement
     """)
