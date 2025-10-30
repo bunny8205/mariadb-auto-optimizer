@@ -4,6 +4,7 @@ import pandas as pd
 import time
 import os
 import sys
+import re
 
 # Add the parent directory to path to import your optimizer
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -34,154 +35,143 @@ def get_connection():
         st.error(f"❌ Database connection failed: {e}")
         return None
 
-def setup_database_tables(conn):
-    """Set up the OpenFlights database tables with correct schema"""
+def clear_database_cache(conn):
+    """Clear database cache for consistent benchmarking"""
     try:
         with conn.cursor() as cursor:
-            # Drop existing tables if they exist
-            cursor.execute("DROP TABLE IF EXISTS routes, airports, airlines")
-
-            # Create airports table
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS airports (
-                    airport_id INT PRIMARY KEY,
-                    name VARCHAR(255),
-                    city VARCHAR(100),
-                    country VARCHAR(100),
-                    iata VARCHAR(10),
-                    icao VARCHAR(10),
-                    latitude DOUBLE,
-                    longitude DOUBLE,
-                    altitude INT,
-                    timezone FLOAT,
-                    dst VARCHAR(10),
-                    tz_database_time_zone VARCHAR(100),
-                    type VARCHAR(50),
-                    source VARCHAR(50)
-                )
-            """)
-
-            # Create airlines table
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS airlines (
-                    airline_id INT PRIMARY KEY,
-                    name VARCHAR(255),
-                    alias VARCHAR(255),
-                    iata VARCHAR(10),
-                    icao VARCHAR(10),
-                    callsign VARCHAR(255),
-                    country VARCHAR(100),
-                    active VARCHAR(5)
-                )
-            """)
-
-            # Create routes table
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS routes (
-                    id INT AUTO_INCREMENT PRIMARY KEY,
-                    airline VARCHAR(10),
-                    airline_id INT,
-                    source_airport VARCHAR(10),
-                    source_airport_id INT,
-                    dest_airport VARCHAR(10),
-                    dest_airport_id INT,
-                    codeshare VARCHAR(10),
-                    stops INT,
-                    equipment VARCHAR(255)
-                )
-            """)
-
-            conn.commit()
-            return True
+            cursor.execute("FLUSH TABLES")
+            cursor.execute("RESET QUERY CACHE")
+        return True
     except Exception as e:
-        st.error(f"❌ Error creating tables: {e}")
+        st.warning(f"Could not clear cache: {e}")
         return False
 
-def load_sample_data(conn):
-    """Load minimal sample data for demo purposes"""
-    try:
-        with conn.cursor() as cursor:
-            # Clear existing data
-            cursor.execute("DELETE FROM routes")
-            cursor.execute("DELETE FROM airlines")
-            cursor.execute("DELETE FROM airports")
-            
-            # Insert sample airports
-            cursor.execute("""
-                INSERT IGNORE INTO airports (airport_id, name, city, country, iata, icao) VALUES
-                (1, 'John F Kennedy International', 'New York', 'United States', 'JFK', 'KJFK'),
-                (2, 'Los Angeles International', 'Los Angeles', 'United States', 'LAX', 'KLAX'),
-                (3, 'Heathrow Airport', 'London', 'United Kingdom', 'LHR', 'EGLL'),
-                (4, 'Charles de Gaulle Airport', 'Paris', 'France', 'CDG', 'LFPG'),
-                (5, 'Frankfurt Airport', 'Frankfurt', 'Germany', 'FRA', 'EDDF'),
-                (6, 'Tokyo Haneda Airport', 'Tokyo', 'Japan', 'HND', 'RJTT'),
-                (7, 'Sydney Airport', 'Sydney', 'Australia', 'SYD', 'YSSY'),
-                (8, 'Beijing Capital International', 'Beijing', 'China', 'PEK', 'ZBAA')
-            """)
-            
-            # Insert sample airlines
-            cursor.execute("""
-                INSERT IGNORE INTO airlines (airline_id, name, country, active, iata, icao) VALUES
-                (1, 'American Airlines', 'United States', 'Y', 'AA', 'AAL'),
-                (2, 'Delta Air Lines', 'United States', 'Y', 'DL', 'DAL'),
-                (3, 'British Airways', 'United Kingdom', 'Y', 'BA', 'BAW'),
-                (4, 'Air France', 'France', 'Y', 'AF', 'AFR'),
-                (5, 'Lufthansa', 'Germany', 'Y', 'LH', 'DLH'),
-                (6, 'Japan Airlines', 'Japan', 'Y', 'JL', 'JAL'),
-                (7, 'Qantas', 'Australia', 'Y', 'QF', 'QFA'),
-                (8, 'Air China', 'China', 'Y', 'CA', 'CCA')
-            """)
-            
-            # Insert sample routes
-            cursor.execute("""
-                INSERT IGNORE INTO routes (airline_id, source_airport_id, dest_airport_id, stops) VALUES
-                (1, 1, 3, 0), (1, 1, 4, 0), (1, 2, 3, 1),
-                (2, 1, 5, 0), (2, 2, 6, 1),
-                (3, 3, 1, 0), (3, 3, 2, 0), (3, 3, 7, 1),
-                (4, 4, 1, 0), (4, 4, 8, 0),
-                (5, 5, 2, 0), (5, 5, 6, 0),
-                (6, 6, 3, 1), (6, 6, 7, 0),
-                (7, 7, 1, 1), (7, 7, 4, 0),
-                (8, 8, 2, 0), (8, 8, 5, 0)
-            """)
+def run_query_with_timing(conn, query, num_runs=3):
+    """Run query multiple times and return statistical results"""
+    times = []
+    
+    for i in range(num_runs):
+        start_time = time.time()
+        try:
+            with conn.cursor() as cursor:
+                cursor.execute(query)
+                results = cursor.fetchall()
+            end_time = time.time()
+            execution_time = end_time - start_time
+            times.append(execution_time)
+        except Exception as e:
+            st.error(f"Error in run {i + 1}: {e}")
+            return None
+    
+    if times:
+        return {
+            'times': times,
+            'median': sorted(times)[len(times)//2],
+            'mean': sum(times) / len(times),
+            'min': min(times),
+            'max': max(times)
+        }
+    return None
 
-            conn.commit()
-            return True
-    except Exception as e:
-        st.error(f"❌ Error loading sample data: {e}")
-        return False
-
-def check_database_ready(conn):
-    """Check if database has the required tables and data"""
-    try:
-        with conn.cursor() as cursor:
-            # Check if tables exist
-            cursor.execute("""
-                SELECT COUNT(*) FROM information_schema.tables 
-                WHERE table_schema = %s AND table_name IN ('airports', 'airlines', 'routes')
-            """, (DB_NAME,))
-            table_count = cursor.fetchone()[0]
+def create_smart_indexes_for_query(conn, query):
+    """Create indexes based on actual query patterns (similar to run_demo.py)"""
+    created_indexes = []
+    query_lower = query.lower()
+    
+    # Extract columns from query using regex patterns
+    column_patterns = [
+        r'where\s+(\w+)\.(\w+)\s*[=<>!]',
+        r'join\s+\w+\s+on\s+(\w+)\.(\w+)\s*=\s*\w+\.\w+',
+        r'group by\s+(\w+)\.(\w+)',
+        r'order by\s+(\w+)\.(\w+)',
+        r'on\s+(\w+)\.(\w+)\s*=\s*\w+\.\w+'
+    ]
+    
+    actual_columns = []
+    for pattern in column_patterns:
+        matches = re.finditer(pattern, query_lower)
+        for match in matches:
+            table, column = match.groups()
+            # Map common aliases to real tables
+            if table in ['r', 'routes']:
+                table = 'routes'
+            elif table in ['a', 'airports']:
+                table = 'airports'
+            elif table in ['al', 'airlines']:
+                table = 'airlines'
+            elif table in ['src', 'source']:
+                table = 'airports'
+            elif table in ['dest', 'destination']:
+                table = 'airports'
+                
+            actual_columns.append((table, column))
+    
+    # Remove duplicates
+    actual_columns = list(set(actual_columns))
+    
+    # Group columns by table
+    columns_by_table = {}
+    for table, column in actual_columns:
+        if table not in columns_by_table:
+            columns_by_table[table] = []
+        if column not in columns_by_table[table]:
+            columns_by_table[table].append(column)
+    
+    # Create indexes for each table
+    for table, columns in columns_by_table.items():
+        if not columns:
+            continue
             
-            if table_count == 3:
-                # Check if data exists
-                cursor.execute("SELECT COUNT(*) FROM routes")
-                route_count = cursor.fetchone()[0]
-                return route_count > 0
-            return False
-    except Exception as e:
-        st.error(f"❌ Error checking database: {e}")
-        return False
+        # Create composite index for multiple columns
+        if len(columns) >= 2:
+            idx_name = f"idx_{table}_composite_{'_'.join(columns[:2])}"
+            composite_cols = ', '.join(columns[:2])
+            sql = f"CREATE INDEX {idx_name} ON {table} ({composite_cols})"
+            
+            try:
+                with conn.cursor() as cursor:
+                    cursor.execute(sql)
+                created_indexes.append(idx_name)
+                st.success(f"Created composite index: {idx_name}")
+            except Exception as e:
+                st.warning(f"Failed to create index {idx_name}: {e}")
+        
+        # Create single-column indexes
+        for column in columns:
+            idx_name = f"idx_{table}_{column}"
+            sql = f"CREATE INDEX {idx_name} ON {table} ({column})"
+            
+            try:
+                with conn.cursor() as cursor:
+                    cursor.execute(sql)
+                created_indexes.append(idx_name)
+                st.success(f"Created single-column index: {idx_name}")
+            except Exception as e:
+                if "Duplicate key name" not in str(e):
+                    st.warning(f"Failed to create index {idx_name}: {e}")
+    
+    return created_indexes
+
+def cleanup_indexes(conn, index_list):
+    """Clean up created indexes"""
+    if not index_list:
+        return
+    
+    for index_spec in index_list:
+        try:
+            if "idx_" in index_spec:
+                parts = index_spec.split('_')
+                table = parts[1] if len(parts) > 1 else None
+                if table:
+                    with conn.cursor() as cursor:
+                        cursor.execute(f"ALTER TABLE {table} DROP INDEX IF EXISTS `{index_spec}`")
+                    st.info(f"Cleaned up: {index_spec}")
+        except Exception as e:
+            st.warning(f"Failed to clean up {index_spec}: {e}")
 
 # --- Demo Queries ---
 DEMO_QUERIES = {
     "Simple Count": "SELECT COUNT(*) as total_airports FROM airports;",
-    "Airlines by Country": """
-        SELECT country, COUNT(*) as airline_count 
-        FROM airlines 
-        WHERE active = 'Y' 
-        GROUP BY country 
-        ORDER BY airline_count DESC;
-    """,
     "Complex Aggregation": """
         SELECT a.country, 
                a.city, 
@@ -242,34 +232,8 @@ DEMO_QUERIES = {
 
 # --- Streamlit UI ---
 st.set_page_config(page_title="MariaDB Auto-Optimizer Demo", layout="wide")
-st.title("⚙️ MariaDB Auto-Optimizer — Query Performance Comparison")
-st.caption("Run queries below to compare Normal vs Optimized Execution")
-
-# --- Database Setup Section ---
-st.sidebar.header("Database Setup")
-
-# Check if database is ready
-conn = get_connection()
-if conn:
-    db_ready = check_database_ready(conn)
-    conn.close()
-else:
-    db_ready = False
-
-if not db_ready:
-    st.warning("⚠️ Database not initialized. Please set up the database first.")
-    if st.sidebar.button("🔄 Initialize Database & Load Sample Data"):
-        conn = get_connection()
-        if conn:
-            with st.spinner("Setting up database tables and loading sample data..."):
-                if setup_database_tables(conn) and load_sample_data(conn):
-                    st.success("✅ Database initialized successfully!")
-                    st.rerun()
-                else:
-                    st.error("❌ Failed to initialize database")
-            conn.close()
-else:
-    st.sidebar.success("✅ Database ready!")
+st.title("⚙️ MariaDB Auto-Optimizer — Real Performance Comparison")
+st.caption("Run queries below to compare Normal vs Optimized Execution with ACTUAL index creation")
 
 # --- Query Selection ---
 st.sidebar.header("Query Selection")
@@ -282,17 +246,38 @@ selected_query = st.sidebar.selectbox(
 default_query = DEMO_QUERIES[selected_query]
 query = st.text_area("Enter your SQL Query:", value=default_query, height=200)
 
-col1, col2 = st.columns(2)
+col1, col2, col3 = st.columns(3)
 with col1:
-    run_comparison = st.button("🚀 Run Query Comparison", disabled=not db_ready)
+    run_comparison = st.button("🚀 Run Real Optimization")
 with col2:
-    show_suggestions = st.button("💡 Show Optimization Suggestions Only")
+    show_suggestions = st.button("💡 Show Suggestions Only")
+with col3:
+    clear_indexes = st.button("🧹 Clear All Indexes")
+
+if clear_indexes:
+    conn = get_connection()
+    if conn:
+        # Drop all non-primary indexes
+        try:
+            with conn.cursor() as cursor:
+                for table in ["routes", "airports", "airlines"]:
+                    cursor.execute(f"""
+                        SELECT INDEX_NAME 
+                        FROM information_schema.STATISTICS 
+                        WHERE TABLE_SCHEMA = %s 
+                        AND TABLE_NAME = %s 
+                        AND INDEX_NAME != 'PRIMARY'
+                    """, (DB_NAME, table))
+                    indexes = [row[0] for row in cursor.fetchall()]
+                    for index in indexes:
+                        cursor.execute(f"ALTER TABLE {table} DROP INDEX IF EXISTS `{index}`")
+            conn.commit()
+            st.success("✅ All indexes cleared!")
+        except Exception as e:
+            st.error(f"Error clearing indexes: {e}")
+        conn.close()
 
 if run_comparison or show_suggestions:
-    if not db_ready:
-        st.error("❌ Please initialize the database first using the sidebar button.")
-        st.stop()
-    
     conn = get_connection()
     if not conn:
         st.stop()
@@ -310,82 +295,128 @@ if run_comparison or show_suggestions:
                 st.info("No optimization suggestions for this query.")
         
         if run_comparison:
-            # Run full comparison
-            cur = conn.cursor()
+            # Run full comparison with ACTUAL index creation
+            st.subheader("📊 Real Performance Comparison")
             
-            # --- Run Normal Execution ---
-            st.subheader("📊 Execution Comparison")
+            # Step 1: Baseline performance
+            with st.spinner("Running baseline performance (without indexes)..."):
+                clear_database_cache(conn)
+                baseline_stats = run_query_with_timing(conn, query, num_runs=2)
+                
+                if not baseline_stats:
+                    st.error("❌ Baseline execution failed")
+                    conn.close()
+                    st.stop()
+                
+                st.write(f"**Baseline Performance (median):** {baseline_stats['median']:.3f}s")
             
-            with st.spinner("Running normal execution..."):
-                start = time.time()
-                try:
-                    cur.execute(query)
-                    result_normal = cur.fetchall()
-                    elapsed_normal = time.time() - start
-                    df_normal = pd.DataFrame(result_normal)
-                    
-                    # Get column names for better display
-                    if cur.description:
-                        columns = [desc[0] for desc in cur.description]
-                        df_normal.columns = columns
-                except Exception as e:
-                    st.error(f"❌ Error in normal execution: {e}")
+            # Step 2: Create indexes
+            with st.spinner("Creating optimized indexes..."):
+                created_indexes = create_smart_indexes_for_query(conn, query)
+                
+                if not created_indexes:
+                    st.warning("No indexes created for this query")
                     conn.close()
                     st.stop()
             
-            # --- Run Optimized Execution ---
-            with st.spinner("Running optimized execution..."):
-                start = time.time()
-                try:
-                    optimized_query = optimizer.optimize_query(query)
-                    cur.execute(optimized_query)
-                    result_opt = cur.fetchall()
-                    elapsed_opt = time.time() - start
-                    df_opt = pd.DataFrame(result_opt)
-                    
-                    # Get column names for better display
-                    if cur.description:
-                        columns_opt = [desc[0] for desc in cur.description]
-                        df_opt.columns = columns_opt
-                except Exception as e:
-                    st.error(f"❌ Error in optimized execution: {e}")
+            # Step 3: Optimized performance
+            with st.spinner("Running optimized performance (with indexes)..."):
+                clear_database_cache(conn)
+                optimized_stats = run_query_with_timing(conn, query, num_runs=2)
+                
+                if not optimized_stats:
+                    st.error("❌ Optimized execution failed")
+                    # Clean up indexes
+                    cleanup_indexes(conn, created_indexes)
                     conn.close()
                     st.stop()
-
-            # --- Display Results ---
+                
+                st.write(f"**Optimized Performance (median):** {optimized_stats['median']:.3f}s")
+            
+            # Step 4: Display results
             col1, col2 = st.columns(2)
             
             with col1:
-                st.metric("Normal Execution Time", f"{elapsed_normal:.4f}s")
-                st.dataframe(df_normal, use_container_width=True)
-                st.caption("Normal Query Result")
+                st.metric(
+                    "Normal Execution Time", 
+                    f"{baseline_stats['median']:.3f}s",
+                    delta=None
+                )
                 
-                # Show original query
-                with st.expander("View Original Query"):
-                    st.code(query, language="sql")
+                # Show baseline execution times
+                with st.expander("Baseline Execution Details"):
+                    st.write(f"Runs: {baseline_stats['times']}")
+                    st.write(f"Mean: {baseline_stats['mean']:.3f}s")
+                    st.write(f"Min: {baseline_stats['min']:.3f}s")
+                    st.write(f"Max: {baseline_stats['max']:.3f}s")
             
             with col2:
-                st.metric("Optimized Execution Time", f"{elapsed_opt:.4f}s")
-                st.dataframe(df_opt, use_container_width=True)
-                st.caption("Optimized Query Result")
+                improvement = ((baseline_stats['median'] - optimized_stats['median']) / baseline_stats['median']) * 100
                 
-                # Show optimized query with suggestions
-                with st.expander("View Optimized Query"):
-                    st.code(optimized_query, language="sql")
+                st.metric(
+                    "Optimized Execution Time", 
+                    f"{optimized_stats['median']:.3f}s",
+                    delta=f"{improvement:.1f}% improvement" if improvement > 0 else f"{abs(improvement):.1f}% slower"
+                )
                 
-                # Calculate improvement
-                if elapsed_normal > 0:
-                    improvement = ((elapsed_normal - elapsed_opt) / elapsed_normal) * 100
-                    if improvement > 0:
-                        st.success(f"✅ Performance improved by {improvement:.1f}%")
-                    elif improvement < 0:
-                        st.warning(f"⚠️ Performance decreased by {abs(improvement):.1f}%")
-                    else:
-                        st.info("⚡ No performance change")
-
-            st.success("✅ Comparison complete!")
+                # Show optimized execution times
+                with st.expander("Optimized Execution Details"):
+                    st.write(f"Runs: {optimized_stats['times']}")
+                    st.write(f"Mean: {optimized_stats['mean']:.3f}s")
+                    st.write(f"Min: {optimized_stats['min']:.3f}s")
+                    st.write(f"Max: {optimized_stats['max']:.3f}s")
+            
+            # Step 5: Show created indexes
+            st.subheader("🔧 Created Indexes")
+            if created_indexes:
+                for idx in created_indexes:
+                    st.code(f"✓ {idx}", language="text")
+                
+                # Ask user if they want to keep indexes
+                keep_indexes = st.checkbox("Keep these indexes for future queries", value=True)
+                if not keep_indexes:
+                    with st.spinner("Cleaning up indexes..."):
+                        cleanup_indexes(conn, created_indexes)
+                        st.info("Indexes cleaned up")
+            else:
+                st.info("No indexes were created")
+            
+            # Show performance comparison
+            if improvement > 0:
+                st.success(f"✅ Performance improved by {improvement:.1f}%!")
+            elif improvement < 0:
+                st.warning(f"⚠️ Performance decreased by {abs(improvement):.1f}%")
+            else:
+                st.info("⚡ No performance change")
     
     except Exception as e:
         st.error(f"❌ Unexpected error: {e}")
     finally:
+        conn.close()
+
+# --- Current Index Status ---
+st.sidebar.header("Database Status")
+if st.sidebar.button("📊 Show Current Indexes"):
+    conn = get_connection()
+    if conn:
+        try:
+            with conn.cursor() as cursor:
+                cursor.execute("""
+                    SELECT TABLE_NAME, INDEX_NAME, COLUMN_NAME, SEQ_IN_INDEX
+                    FROM information_schema.STATISTICS
+                    WHERE TABLE_SCHEMA = %s 
+                    AND TABLE_NAME IN ('routes', 'airports', 'airlines')
+                    AND INDEX_NAME != 'PRIMARY'
+                    ORDER BY TABLE_NAME, INDEX_NAME, SEQ_IN_INDEX
+                """, (DB_NAME,))
+                
+                indexes = cursor.fetchall()
+                if indexes:
+                    st.sidebar.write("**Current Indexes:**")
+                    df_indexes = pd.DataFrame(indexes, columns=['Table', 'Index', 'Column', 'Position'])
+                    st.sidebar.dataframe(df_indexes)
+                else:
+                    st.sidebar.info("No indexes found")
+        except Exception as e:
+            st.sidebar.error(f"Error fetching indexes: {e}")
         conn.close()
