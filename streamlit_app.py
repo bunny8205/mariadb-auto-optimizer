@@ -1,4 +1,5 @@
 import os
+
 os.environ["STREAMLIT_SERVER_FILE_WATCHER_TYPE"] = "none"
 import streamlit as st
 import pymysql
@@ -17,7 +18,7 @@ warnings.filterwarnings('ignore', message='.*pandas only supports SQLAlchemy con
 # Add the parent directory to path to import your optimizer
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from mariadb_autoopt.connector import AutoOptimizer  # ✅ Use the new connector
+from mariadb_autoopt import optimizer  # ✅ Use your existing modules
 
 # --- Database Connection Setup ---
 DB_HOST = os.getenv("AUTOOPT_DB_HOST", "serverless-us-central1.sysp0000.db2.skysql.com")
@@ -26,32 +27,16 @@ DB_USER = os.getenv("AUTOOPT_DB_USER", "dbpgf17821108")
 DB_PASS = os.getenv("AUTOOPT_DB_PASS", "Rn@08022005")
 DB_NAME = os.getenv("AUTOOPT_DB_NAME", "autoopt_db")
 
-# --- Initialize AutoOptimizer ---
-@st.cache_resource
-def get_auto_optimizer():
-    """Initialize and cache the AutoOptimizer"""
-    try:
-        optimizer = AutoOptimizer(
-            host=DB_HOST,
-            user=DB_USER,
-            password=DB_PASS,
-            database=DB_NAME,
-            port=DB_PORT
-        )
-        return optimizer
-    except Exception as e:
-        st.error(f"❌ AutoOptimizer initialization failed: {e}")
-        return None
 
-# --- Connect Function (kept for data loading) ---
+# --- Connect Function ---
 def get_connection():
     try:
         conn = pymysql.connect(
-            host=DB_HOST, 
-            port=DB_PORT, 
+            host=DB_HOST,
+            port=DB_PORT,
             user=DB_USER,
-            password=DB_PASS, 
-            database=DB_NAME, 
+            password=DB_PASS,
+            database=DB_NAME,
             ssl={'ssl': {}},
             connect_timeout=10,
             autocommit=True  # Better transaction handling
@@ -60,6 +45,7 @@ def get_connection():
     except Exception as e:
         st.error(f"❌ Database connection failed: {e}")
         return None
+
 
 def clear_database_cache(conn):
     """Clear database cache for consistent benchmarking"""
@@ -72,10 +58,11 @@ def clear_database_cache(conn):
         st.warning(f"Could not clear cache: {e}")
         return False
 
+
 def run_query_with_timing(conn, query, num_runs=3):
     """Run query multiple times and return statistical results"""
     times = []
-    
+
     for i in range(num_runs):
         start_time = time.time()
         try:
@@ -88,16 +75,17 @@ def run_query_with_timing(conn, query, num_runs=3):
         except Exception as e:
             st.error(f"Error in run {i + 1}: {e}")
             return None
-    
+
     if times:
         return {
             'times': times,
-            'median': sorted(times)[len(times)//2],
+            'median': sorted(times)[len(times) // 2],
             'mean': sum(times) / len(times),
             'min': min(times),
             'max': max(times)
         }
     return None
+
 
 def get_query_time(conn, query):
     """Get single query execution time"""
@@ -111,10 +99,12 @@ def get_query_time(conn, query):
         st.error(f"Error executing query: {e}")
         return float('inf')
 
+
 def should_optimize_query(conn, query, threshold_seconds=0.05):
     """Check if query is slow enough to benefit from optimization"""
     baseline_time = get_query_time(conn, query)
     return baseline_time > threshold_seconds
+
 
 def validate_improvement(baseline_time, optimized_time, threshold=0.10):
     """Validate if optimization actually helped (10% improvement threshold)"""
@@ -122,6 +112,7 @@ def validate_improvement(baseline_time, optimized_time, threshold=0.10):
         return False
     improvement = (baseline_time - optimized_time) / baseline_time
     return improvement >= threshold
+
 
 def drop_all_indexes(conn):
     """Drop all existing indexes to simulate unoptimized database (like run_demo.py)"""
@@ -153,26 +144,137 @@ def drop_all_indexes(conn):
         st.error(f"❌ Could not drop indexes: {e}")
         return False
 
+
+def create_smart_indexes_for_query(conn, query):
+    """Enhanced index creation matching your local demo"""
+    created_indexes = []
+    query_lower = query.lower()
+
+    # Use the same alias resolution as your local demo
+    table_aliases = {}
+    alias_patterns = [
+        r'from\s+(\w+)\s+(\w+)',
+        r'join\s+(\w+)\s+(\w+)',
+        r'from\s+(\w+)\s+as\s+(\w+)',
+        r'join\s+(\w+)\s+as\s+(\w+)'
+    ]
+
+    for pattern in alias_patterns:
+        matches = re.finditer(pattern, query_lower)
+        for match in matches:
+            table_name, alias = match.groups()
+            table_aliases[alias] = table_name
+
+    # Extract columns with proper alias resolution
+    actual_columns = []
+    column_patterns = [
+        r'where\s+(\w+)\.(\w+)\s*[=<>!]',
+        r'join\s+\w+\s+on\s+(\w+)\.(\w+)\s*=\s*\w+\.\w+',
+        r'group by\s+(\w+)\.(\w+)',
+        r'order by\s+(\w+)\.(\w+)',
+        r'on\s+(\w+)\.(\w+)\s*=\s*\w+\.\w+'
+    ]
+
+    for pattern in column_patterns:
+        matches = re.finditer(pattern, query_lower)
+        for match in matches:
+            table_ref, column = match.groups()
+            # Resolve alias
+            actual_table = table_aliases.get(table_ref, table_ref)
+
+            # Map aliases to real tables
+            if actual_table in ['r', 'routes']:
+                actual_table = 'routes'
+            elif actual_table in ['a', 'airports']:
+                actual_table = 'airports'
+            elif actual_table in ['al', 'airlines']:
+                actual_table = 'airlines'
+            elif actual_table in ['src', 'source']:
+                actual_table = 'airports'
+            elif actual_table in ['dest', 'destination']:
+                actual_table = 'airports'
+            elif actual_table in ['r2', 'r3', 'r4', 'r5']:
+                continue  # Skip subquery aliases
+
+            # Only include real tables
+            if actual_table in ['routes', 'airports', 'airlines']:
+                actual_columns.append((actual_table, column))
+
+    # Remove duplicates
+    actual_columns = list(set(actual_columns))
+
+    if actual_columns:
+        st.info(f"🔍 Found indexable columns: {actual_columns}")
+
+    # Group by table and create indexes (matching your local strategy)
+    columns_by_table = {}
+    for table, column in actual_columns:
+        if table not in columns_by_table:
+            columns_by_table[table] = []
+        if column not in columns_by_table[table]:
+            columns_by_table[table].append(column)
+
+    # Create indexes matching your successful local strategy
+    for table, columns in columns_by_table.items():
+        if not columns:
+            continue
+
+        st.write(f"**Creating indexes for table `{table}`:**")
+
+        # Create composite indexes for 2+ columns (like local demo)
+        if len(columns) >= 2:
+            idx_name = f"idx_{table}_composite_{'_'.join(columns[:2])}"
+            composite_cols = ', '.join(columns[:2])
+            sql = f"CREATE INDEX {idx_name} ON {table} ({composite_cols})"
+
+            try:
+                with conn.cursor() as cursor:
+                    cursor.execute(sql)
+                created_indexes.append(idx_name)
+                st.success(f"✓ Composite index: `{idx_name}`")
+            except Exception as e:
+                if "Duplicate key name" not in str(e):
+                    st.warning(f"Failed to create index {idx_name}: {e}")
+
+        # Create single-column indexes for important columns
+        for column in columns:
+            if column in ['country', 'city', 'active', 'airline_id', 'source_airport_id',
+                          'dest_airport_id', 'stops', 'name', 'airport_id']:
+                idx_name = f"idx_{table}_{column}"
+                sql = f"CREATE INDEX {idx_name} ON {table} ({column})"
+
+                try:
+                    with conn.cursor() as cursor:
+                        cursor.execute(sql)
+                    created_indexes.append(idx_name)
+                    st.success(f"✓ Single-column index: `{idx_name}`")
+                except Exception as e:
+                    if "Duplicate key name" not in str(e):
+                        st.warning(f"Failed to create index {idx_name}: {e}")
+
+    return created_indexes
+
+
 def display_performance_comparison(baseline_stats, optimized_stats, improvement_validated=True):
     """Display performance comparison with visual indicators"""
     improvement = ((baseline_stats['median'] - optimized_stats['median']) / baseline_stats['median']) * 100
-    
+
     col1, col2, col3 = st.columns([1, 1, 1])
-    
+
     with col1:
         st.metric(
-            "Before Optimization", 
+            "Before Optimization",
             f"{baseline_stats['median']:.3f}s",
             delta=None
         )
-    
+
     with col2:
         st.metric(
-            "After Optimization", 
-            f"{optimized_stats['median']:.3f}s", 
+            "After Optimization",
+            f"{optimized_stats['median']:.3f}s",
             delta=None
         )
-    
+
     with col3:
         if improvement > 0 and improvement_validated:
             st.metric(
@@ -182,7 +284,7 @@ def display_performance_comparison(baseline_stats, optimized_stats, improvement_
             )
         elif improvement > 0:
             st.metric(
-                "Improvement", 
+                "Improvement",
                 f"{improvement:.1f}%",
                 delta=f"⚠️ {improvement:.1f}% faster (below threshold)",
                 delta_color="off"
@@ -194,14 +296,14 @@ def display_performance_comparison(baseline_stats, optimized_stats, improvement_
                 delta=f"⚠️ {abs(improvement):.1f}% slower",
                 delta_color="inverse"
             )
-    
+
     # Performance rating
     if improvement > 50 and improvement_validated:
         rating = "🏆 PHENOMENAL!"
         color = "green"
     elif improvement > 30 and improvement_validated:
         rating = "🎯 EXCELLENT!"
-        color = "green" 
+        color = "green"
     elif improvement > 15 and improvement_validated:
         rating = "⭐ GREAT!"
         color = "blue"
@@ -214,9 +316,9 @@ def display_performance_comparison(baseline_stats, optimized_stats, improvement_
     else:
         rating = "📉 REGRESSION"
         color = "red"
-    
+
     st.write(f"**Performance Rating:** :{color}[{rating}]")
-    
+
     # Show detailed timing information
     with st.expander("📊 Detailed Timing Information"):
         col1, col2 = st.columns(2)
@@ -224,9 +326,9 @@ def display_performance_comparison(baseline_stats, optimized_stats, improvement_
             st.write("**Baseline Execution:**")
             st.write(f"- Runs: {[f'{t:.3f}s' for t in baseline_stats['times']]}")
             st.write(f"- Mean: {baseline_stats['mean']:.3f}s")
-            st.write(f"- Min: {baseline_stats['min']:.3f}s") 
+            st.write(f"- Min: {baseline_stats['min']:.3f}s")
             st.write(f"- Max: {baseline_stats['max']:.3f}s")
-        
+
         with col2:
             st.write("**Optimized Execution:**")
             st.write(f"- Runs: {[f'{t:.3f}s' for t in optimized_stats['times']]}")
@@ -234,11 +336,12 @@ def display_performance_comparison(baseline_stats, optimized_stats, improvement_
             st.write(f"- Min: {optimized_stats['min']:.3f}s")
             st.write(f"- Max: {optimized_stats['max']:.3f}s")
 
+
 def cleanup_indexes(conn, index_list):
     """Clean up created indexes"""
     if not index_list:
         return
-    
+
     for index_spec in index_list:
         try:
             if "idx_" in index_spec:
@@ -251,6 +354,7 @@ def cleanup_indexes(conn, index_list):
         except Exception as e:
             st.warning(f"Failed to clean up {index_spec}: {e}")
 
+
 def safe_close_connection(conn):
     """Safely close connection without raising errors"""
     try:
@@ -258,6 +362,7 @@ def safe_close_connection(conn):
             conn.close()
     except:
         pass  # Ignore any errors during close
+
 
 def check_data_volume(conn):
     """Check if tables have sufficient data for optimization"""
@@ -270,35 +375,36 @@ def check_data_volume(conn):
                 table_counts[table] = count
         except Exception as e:
             st.error(f"Error checking {table}: {e}")
-    
+
     return table_counts
+
 
 def download_openflights_data():
     """Download the complete OpenFlights dataset from GitHub"""
     base_url = "https://raw.githubusercontent.com/jpatokal/openflights/master/data/"
     datasets = {
         "airports": f"{base_url}airports.dat",
-        "airlines": f"{base_url}airlines.dat", 
+        "airlines": f"{base_url}airlines.dat",
         "routes": f"{base_url}routes.dat"
     }
-    
+
     data = {}
     for name, url in datasets.items():
         try:
             st.write(f"📥 Downloading {name} dataset...")
             response = requests.get(url)
             response.raise_for_status()
-            
+
             # Read into pandas
             if name == "airports":
                 df = pd.read_csv(io.StringIO(response.text), header=None, names=[
-                    "airport_id", "name", "city", "country", "iata", "icao", 
-                    "latitude", "longitude", "altitude", "timezone", "dst", 
+                    "airport_id", "name", "city", "country", "iata", "icao",
+                    "latitude", "longitude", "altitude", "timezone", "dst",
                     "tz_database_time_zone", "type", "source"
                 ], na_values="\\N")
             elif name == "airlines":
                 df = pd.read_csv(io.StringIO(response.text), header=None, names=[
-                    "airline_id", "name", "alias", "iata", "icao", "callsign", 
+                    "airline_id", "name", "alias", "iata", "icao", "callsign",
                     "country", "active"
                 ], na_values="\\N")
             elif name == "routes":
@@ -306,19 +412,20 @@ def download_openflights_data():
                     "airline", "airline_id", "source_airport", "source_airport_id",
                     "dest_airport", "dest_airport_id", "codeshare", "stops", "equipment"
                 ], na_values="\\N")
-            
+
             # Convert NaN to None for MySQL
             df = df.where(pd.notnull(df), None)
             df = df.astype(object).where(pd.notnull(df), None)
-            
+
             data[name] = df
             st.success(f"✅ Downloaded {name}: {len(df):,} records")
-            
+
         except Exception as e:
             st.error(f"❌ Failed to download {name}: {e}")
             return None
-    
+
     return data
+
 
 def load_complete_openflights_data(conn):
     """Load COMPLETE OpenFlights dataset with ALL data"""
@@ -326,73 +433,152 @@ def load_complete_openflights_data(conn):
         st.write("## 🗂️ Loading Complete OpenFlights Dataset")
         st.write("This will download and load the FULL OpenFlights dataset with:")
         st.write("- 🌍 7,000+ airports worldwide")
-        st.write("- ✈️ 6,000+ airlines") 
+        st.write("- ✈️ 6,000+ airlines")
         st.write("- 🛣️ 67,000+ flight routes")
         st.write("This may take 1-2 minutes...")
-        
+
         # Download data
         data = download_openflights_data()
         if not data:
             st.error("❌ Failed to download OpenFlights data")
             return False
-        
+
         # Create tables
         with conn.cursor() as cursor:
             # Drop existing tables if they exist
             cursor.execute("DROP TABLE IF EXISTS routes, airports, airlines")
-            
+
             # Create airports table
             cursor.execute("""
-                CREATE TABLE IF NOT EXISTS airports (
-                    airport_id INT PRIMARY KEY,
-                    name VARCHAR(255),
-                    city VARCHAR(100),
-                    country VARCHAR(100),
-                    iata VARCHAR(10),
-                    icao VARCHAR(10),
-                    latitude DOUBLE,
-                    longitude DOUBLE,
-                    altitude INT,
-                    timezone FLOAT,
-                    dst VARCHAR(10),
-                    tz_database_time_zone VARCHAR(100),
-                    type VARCHAR(50),
-                    source VARCHAR(50)
-                )
-            """)
-            
+                           CREATE TABLE IF NOT EXISTS airports
+                           (
+                               airport_id
+                               INT
+                               PRIMARY
+                               KEY,
+                               name
+                               VARCHAR
+                           (
+                               255
+                           ),
+                               city VARCHAR
+                           (
+                               100
+                           ),
+                               country VARCHAR
+                           (
+                               100
+                           ),
+                               iata VARCHAR
+                           (
+                               10
+                           ),
+                               icao VARCHAR
+                           (
+                               10
+                           ),
+                               latitude DOUBLE,
+                               longitude DOUBLE,
+                               altitude INT,
+                               timezone FLOAT,
+                               dst VARCHAR
+                           (
+                               10
+                           ),
+                               tz_database_time_zone VARCHAR
+                           (
+                               100
+                           ),
+                               type VARCHAR
+                           (
+                               50
+                           ),
+                               source VARCHAR
+                           (
+                               50
+                           )
+                               )
+                           """)
+
             # Create airlines table
             cursor.execute("""
-                CREATE TABLE IF NOT EXISTS airlines (
-                    airline_id INT PRIMARY KEY,
-                    name VARCHAR(255),
-                    alias VARCHAR(255),
-                    iata VARCHAR(10),
-                    icao VARCHAR(10),
-                    callsign VARCHAR(255),
-                    country VARCHAR(100),
-                    active VARCHAR(5)
-                )
-            """)
-            
+                           CREATE TABLE IF NOT EXISTS airlines
+                           (
+                               airline_id
+                               INT
+                               PRIMARY
+                               KEY,
+                               name
+                               VARCHAR
+                           (
+                               255
+                           ),
+                               alias VARCHAR
+                           (
+                               255
+                           ),
+                               iata VARCHAR
+                           (
+                               10
+                           ),
+                               icao VARCHAR
+                           (
+                               10
+                           ),
+                               callsign VARCHAR
+                           (
+                               255
+                           ),
+                               country VARCHAR
+                           (
+                               100
+                           ),
+                               active VARCHAR
+                           (
+                               5
+                           )
+                               )
+                           """)
+
             # Create routes table
             cursor.execute("""
-                CREATE TABLE IF NOT EXISTS routes (
-                    id INT AUTO_INCREMENT PRIMARY KEY,
-                    airline VARCHAR(10),
-                    airline_id INT,
-                    source_airport VARCHAR(10),
-                    source_airport_id INT,
-                    dest_airport VARCHAR(10),
-                    dest_airport_id INT,
-                    codeshare VARCHAR(10),
-                    stops INT,
-                    equipment VARCHAR(255)
-                )
-            """)
-        
+                           CREATE TABLE IF NOT EXISTS routes
+                           (
+                               id
+                               INT
+                               AUTO_INCREMENT
+                               PRIMARY
+                               KEY,
+                               airline
+                               VARCHAR
+                           (
+                               10
+                           ),
+                               airline_id INT,
+                               source_airport VARCHAR
+                           (
+                               10
+                           ),
+                               source_airport_id INT,
+                               dest_airport VARCHAR
+                           (
+                               10
+                           ),
+                               dest_airport_id INT,
+                               codeshare VARCHAR
+                           (
+                               10
+                           ),
+                               stops INT,
+                               equipment VARCHAR
+                           (
+                               255
+                           )
+                               )
+                           """)
+
         st.success("✅ Tables created successfully!")
-        
+
         # Insert data with batch processing
         def insert_dataframe_to_table(conn, df, table_name, batch_size=1000):
             if df.empty:
@@ -414,11 +600,11 @@ def load_complete_openflights_data(conn):
                     # Batch insert for performance
                     inserted_count = 0
                     progress_bar = st.progress(0)
-                    
+
                     for i in range(0, total_rows, batch_size):
                         batch = df.iloc[i:i + batch_size]
                         batch_data = [tuple(row) for row in batch.itertuples(index=False)]
-                        
+
                         try:
                             cursor.executemany(insert_sql, batch_data)
                             inserted_count += len(batch_data)
@@ -441,7 +627,7 @@ def load_complete_openflights_data(conn):
 
         # Insert all datasets
         airports_inserted = insert_dataframe_to_table(conn, data["airports"], "airports")
-        airlines_inserted = insert_dataframe_to_table(conn, data["airlines"], "airlines") 
+        airlines_inserted = insert_dataframe_to_table(conn, data["airlines"], "airlines")
         routes_inserted = insert_dataframe_to_table(conn, data["routes"], "routes")
 
         st.success("🎉 Complete OpenFlights dataset loaded successfully!")
@@ -449,112 +635,70 @@ def load_complete_openflights_data(conn):
         st.write(f"- Airports: {airports_inserted:,} rows")
         st.write(f"- Airlines: {airlines_inserted:,} rows")
         st.write(f"- Routes: {routes_inserted:,} rows")
-        
+
         return True
 
     except Exception as e:
         st.error(f"❌ Error loading OpenFlights dataset: {e}")
         return False
 
-# --- Demo Queries (Updated with new complex queries) ---
+
+# --- Demo Queries ---
 DEMO_QUERIES = {
-    "Recursive Route Pathfinding": """
-WITH RECURSIVE route_paths AS (
-    -- Base case: direct routes
-    SELECT 
-        r.source_airport_id,
-        r.dest_airport_id,
-        r.airline_id,
-        r.stops,
-        1 as hop_count,
-        CAST(CONCAT(a1.iata, '->', a2.iata) AS CHAR(1000)) as path,
-        r.stops as total_stops
-    FROM routes r
-    JOIN airports a1 ON r.source_airport_id = a1.airport_id
-    JOIN airports a2 ON r.dest_airport_id = a2.airport_id
-    WHERE a1.country = 'United States' 
-      AND a2.country = 'Australia'
-      AND r.stops = 0
-    
-    UNION ALL
-    
-    -- Recursive case: multi-hop routes
-    SELECT 
-        rp.source_airport_id,
-        r.dest_airport_id,
-        r.airline_id,
-        r.stops,
-        rp.hop_count + 1,
-        CAST(CONCAT(rp.path, '->', a2.iata) AS CHAR(1000)),
-        rp.total_stops + r.stops
-    FROM route_paths rp
-    JOIN routes r ON rp.dest_airport_id = r.source_airport_id
-    JOIN airports a2 ON r.dest_airport_id = a2.airport_id
-    WHERE rp.hop_count < 3  -- Maximum 3 hops
-      AND rp.dest_airport_id != r.dest_airport_id  -- Avoid cycles
-      AND INSTR(rp.path, a2.iata) = 0  -- No airport repetition
-)
-SELECT 
-    path as route,
-    hop_count,
-    total_stops,
-    al.name as airline_name
-FROM route_paths rp
-JOIN airlines al ON rp.airline_id = al.airline_id
-WHERE al.active = 'Y'
-ORDER BY hop_count, total_stops
-LIMIT 100;
-    """,
-    "Advanced Geographic Analysis": """
-SELECT 
-    src.country as source_country,
-    dest.country as dest_country,
-    COUNT(*) as total_routes,
-    COUNT(DISTINCT r.airline_id) as unique_airlines,
-    AVG(r.stops) as avg_stops,
-    -- Geographic distance calculation (approximate)
-    (6371 * acos(cos(radians(src.latitude)) * cos(radians(dest.latitude)) 
-     * cos(radians(dest.longitude) - radians(src.longitude)) 
-     + sin(radians(src.latitude)) * sin(radians(dest.latitude)))) as distance_km,
-    -- Route density analysis
-    COUNT(*) / (SELECT COUNT(*) FROM routes r2 
-                WHERE r2.source_airport_id = src.airport_id) as route_concentration,
-    -- Market share analysis
-    (COUNT(*) * 100.0 / (SELECT COUNT(*) FROM routes r3 
-                        WHERE r3.dest_airport_id = dest.airport_id)) as destination_market_share
-FROM routes r
-JOIN airports src ON r.source_airport_id = src.airport_id
-JOIN airports dest ON r.dest_airport_id = dest.airport_id
-JOIN airlines al ON r.airline_id = al.airline_id
-WHERE src.country != dest.country
-  AND al.active = 'Y'
-  AND src.latitude IS NOT NULL 
-  AND dest.latitude IS NOT NULL
-GROUP BY src.country, dest.country, src.airport_id, dest.airport_id, 
-         src.latitude, src.longitude, dest.latitude, dest.longitude
-HAVING total_routes > 5 AND distance_km > 500
-ORDER BY distance_km DESC, total_routes DESC
-LIMIT 50;
-    """,
+    "Complex Aggregation": """
+                           SELECT a.country,
+                                  a.city,
+                                  COUNT(*)                     as total_routes,
+                                  COUNT(DISTINCT r.airline_id) as unique_airlines,
+                                  AVG(r.stops)                 as avg_stops
+                           FROM routes r
+                                    JOIN airports a ON r.source_airport_id = a.airport_id
+                                    JOIN airlines al ON r.airline_id = al.airline_id
+                           WHERE a.country IN ('United States', 'China', 'Germany', 'United Kingdom', 'France')
+                             AND al.active = 'Y'
+                             AND r.stops <= 2
+                           GROUP BY a.country, a.city
+                           HAVING total_routes > 5
+                           ORDER BY total_routes DESC LIMIT 50;
+                           """,
     "Large Dataset Analysis": """
-        SELECT al.name as airline_name, 
-               al.country, 
-               COUNT(*) as total_routes, 
-               (SELECT COUNT(*) 
-                FROM routes r2 
-                WHERE r2.airline_id = al.airline_id 
-                  AND r2.stops = 0) as direct_routes, 
-               (SELECT COUNT(DISTINCT r3.dest_airport_id) 
-                FROM routes r3 
-                WHERE r3.airline_id = al.airline_id) as unique_destinations
-        FROM routes r
-        JOIN airlines al ON r.airline_id = al.airline_id
-        WHERE al.active = 'Y'
-        GROUP BY al.airline_id, al.name, al.country
-        HAVING total_routes > 20
-        ORDER BY total_routes DESC 
-        LIMIT 30;
-    """
+                              SELECT al.name                               as airline_name,
+                                     al.country,
+                                     COUNT(*)                              as total_routes,
+                                     (SELECT COUNT(*)
+                                      FROM routes r2
+                                      WHERE r2.airline_id = al.airline_id
+                                        AND r2.stops = 0)                  as direct_routes,
+                                     (SELECT COUNT(DISTINCT r3.dest_airport_id)
+                                      FROM routes r3
+                                      WHERE r3.airline_id = al.airline_id) as unique_destinations
+                              FROM routes r
+                                       JOIN airlines al ON r.airline_id = al.airline_id
+                              WHERE al.active = 'Y'
+                              GROUP BY al.airline_id, al.name, al.country
+                              HAVING total_routes > 20
+                              ORDER BY total_routes DESC LIMIT 30;
+                              """,
+    "Cross-Table Analysis": """
+                            SELECT src.country                  as source_country,
+                                   dest.country                 as dest_country,
+                                   COUNT(*)                     as route_count,
+                                   COUNT(DISTINCT r.airline_id) as airlines_operating,
+                                   MIN(r.stops)                 as min_stops,
+                                   MAX(r.stops)                 as max_stops
+                            FROM routes r
+                                     JOIN airports src ON r.source_airport_id = src.airport_id
+                                     JOIN airports dest ON r.dest_airport_id = dest.airport_id
+                                     JOIN airlines al ON r.airline_id = al.airline_id
+                            WHERE src.country != dest.country
+          AND al.active = 'Y'
+          AND src.country IN ('United States', 'China', 'Germany')
+          AND dest.country IN ('United Kingdom', 'France', 'Japan', 'Australia')
+                            GROUP BY src.country, dest.country
+                            HAVING route_count > 10
+                            ORDER BY route_count DESC
+                                LIMIT 25;
+                            """
 }
 
 # --- Streamlit UI ---
@@ -565,18 +709,22 @@ st.caption("Uses COMPLETE OpenFlights dataset with 67,000+ routes for real perfo
 # --- Database Setup Section ---
 st.sidebar.header("Database Setup")
 
+
 def check_database_tables(conn):
     """Check if required tables exist"""
     try:
         with conn.cursor() as cursor:
             cursor.execute("""
-                SELECT COUNT(*) FROM information_schema.tables 
-                WHERE table_schema = %s AND table_name IN ('airports', 'airlines', 'routes')
-            """, (DB_NAME,))
+                           SELECT COUNT(*)
+                           FROM information_schema.tables
+                           WHERE table_schema = %s
+                             AND table_name IN ('airports', 'airlines', 'routes')
+                           """, (DB_NAME,))
             return cursor.fetchone()[0] == 3
     except Exception as e:
         st.error(f"Error checking tables: {e}")
         return False
+
 
 # Check database status
 conn = None
@@ -597,7 +745,7 @@ if db_ready and table_counts:
     st.sidebar.write("**Current Data Volume:**")
     for table, count in table_counts.items():
         st.sidebar.write(f"- {table}: {count:,} rows")
-    
+
     # Check if we have sufficient data
     if table_counts.get('routes', 0) < 10000:
         st.sidebar.warning("⚠️ Limited data detected. Load full dataset for better results.")
@@ -655,38 +803,32 @@ if run_comparison or show_suggestions:
     if not db_ready:
         st.error("❌ Please load the complete OpenFlights dataset first using the sidebar button.")
         st.stop()
-    
-    # Initialize AutoOptimizer
-    auto_opt = get_auto_optimizer()
-    if not auto_opt:
-        st.error("❌ Failed to initialize AutoOptimizer")
-        st.stop()
-    
+
     conn = get_connection()
     if not conn:
         st.stop()
-    
+
     try:
         if show_suggestions:
             # Just show optimization suggestions
             st.subheader("🔍 Optimization Suggestions")
-            # Note: You might want to add a suggest_indexes method to your connector
-            st.info("Suggestions feature will use the same index creation logic as optimization")
-            st.write("The optimizer will create indexes for:")
-            st.write("- WHERE clause columns")
-            st.write("- JOIN condition columns") 
-            st.write("- GROUP BY columns")
-            st.write("- ORDER BY columns")
-        
+            suggestions = optimizer.suggest_indexes(query)
+            if suggestions:
+                st.write("**Recommended Indexes:**")
+                for i, suggestion in enumerate(suggestions, 1):
+                    st.code(suggestion, language="sql")
+            else:
+                st.info("No optimization suggestions for this query.")
+
         if run_comparison:
-            # Run full comparison using AutoOptimizer
+            # Run full comparison with ACTUAL index creation
             st.subheader("📊 Real Performance Comparison")
-            
+
             # STEP 1: DROP ALL EXISTING INDEXES (EXACTLY like run_demo.py)
             st.write("**🔧 Step 1: Preparing Database**")
             with st.spinner("Dropping all existing indexes to simulate unoptimized database..."):
                 drop_all_indexes(conn)
-            
+
             # Check if optimization is worthwhile
             st.write("**🔍 Step 2: Pre-optimization Analysis**")
             if not should_optimize_query(conn, query, threshold_seconds=0.01):  # 10ms threshold like local demo
@@ -694,90 +836,122 @@ if run_comparison or show_suggestions:
                 proceed_anyway = st.checkbox("Proceed with optimization anyway", value=True)
                 if not proceed_anyway:
                     st.stop()
-            
-            # Use AutoOptimizer for the main optimization
-            st.write("**🚀 Step 3: Running AutoOptimizer**")
-            with st.spinner("Running automatic query optimization..."):
-                result = auto_opt.optimize_query(query, improvement_threshold=0.10)
-            
-            # Step 4: Display results
-            st.write("**📈 Step 4: Performance Comparison**")
-            
-            # Convert result to the format expected by display_performance_comparison
-            baseline_stats = result.baseline_stats
-            optimized_stats = result.optimized_stats
-            improvement_validated = result.accepted
-            
+
+            # Step 3: Baseline performance
+            st.write("**📊 Step 3: Baseline Performance**")
+            with st.spinner("Running baseline performance (without indexes)..."):
+                clear_database_cache(conn)
+                baseline_stats = run_query_with_timing(conn, query, num_runs=3)
+
+                if not baseline_stats:
+                    st.error("❌ Baseline execution failed")
+                    st.stop()
+
+                st.write(f"**Baseline Performance (median):** {baseline_stats['median']:.3f}s")
+
+            # Step 4: Create indexes
+            st.write("**🔧 Step 4: Creating Optimized Indexes**")
+            with st.spinner("Creating optimized indexes..."):
+                created_indexes = create_smart_indexes_for_query(conn, query)
+
+                if not created_indexes:
+                    st.warning("No indexes created for this query")
+                    # Continue to show baseline results only
+                    st.info("Showing baseline results only - no optimization performed")
+                    st.stop()
+
+            # Step 5: Optimized performance
+            st.write("**📊 Step 5: Optimized Performance**")
+            with st.spinner("Running optimized performance (with indexes)..."):
+                clear_database_cache(conn)
+                optimized_stats = run_query_with_timing(conn, query, num_runs=3)
+
+                if not optimized_stats:
+                    st.error("❌ Optimized execution failed")
+                    # Clean up indexes but don't stop the app
+                    if created_indexes:
+                        cleanup_indexes(conn, created_indexes)
+                    st.stop()
+
+            # Step 6: Validate improvement
+            improvement_validated = validate_improvement(
+                baseline_stats['median'],
+                optimized_stats['median'],
+                threshold=0.10
+            )
+
+            if improvement_validated:
+                st.success(f"✅ Optimization validated! Improvement meets 10% threshold")
+            else:
+                improvement = ((baseline_stats['median'] - optimized_stats['median']) / baseline_stats['median']) * 100
+                if improvement > 0:
+                    st.warning(f"⚠️ Improvement ({improvement:.1f}%) below 10% threshold - indexes will be cleaned up")
+                else:
+                    st.error(f"📉 Performance regression ({abs(improvement):.1f}% slower) - indexes will be cleaned up")
+
+            # Step 7: Display results
+            st.write("**📈 Step 6: Performance Comparison**")
             display_performance_comparison(baseline_stats, optimized_stats, improvement_validated)
-            
-            # Step 5: Show created indexes and handle cleanup
+
+            # Step 8: Show created indexes and handle cleanup
             st.subheader("🔧 Created Indexes")
-            if result.created_indexes:
-                for idx in result.created_indexes:
+            if created_indexes:
+                for idx in created_indexes:
                     st.code(f"✓ {idx}", language="text")
-                
+
                 # Handle index cleanup based on validation
                 if improvement_validated:
                     keep_indexes = st.checkbox("Keep these indexes for future queries", value=True)
                     if not keep_indexes:
                         with st.spinner("Cleaning up indexes..."):
-                            auto_opt.cleanup_indexes(result.created_indexes)
+                            cleanup_indexes(conn, created_indexes)
                             st.info("Indexes cleaned up")
                 else:
                     with st.spinner("Cleaning up indexes (improvement below threshold)..."):
-                        auto_opt.cleanup_indexes(result.created_indexes)
+                        cleanup_indexes(conn, created_indexes)
                         st.info("Indexes cleaned up due to insufficient improvement")
             else:
                 st.info("No indexes were created")
-                
-            # Show query explanation
-            with st.expander("🔍 View Query Execution Plan"):
-                try:
-                    explain_df = auto_opt.explain_query(query)
-                    st.dataframe(explain_df)
-                except Exception as e:
-                    st.warning(f"Could not explain query: {e}")
-    
+
     except Exception as e:
         st.error(f"❌ Unexpected error: {e}")
-        import traceback
-        st.code(traceback.format_exc())
     finally:
         safe_close_connection(conn)
 
 # --- Current Index Status ---
 st.sidebar.header("Database Status")
 if st.sidebar.button("📊 Show Current Indexes"):
-    auto_opt = get_auto_optimizer()
-    if auto_opt:
+    conn = get_connection()
+    if conn:
         try:
-            indexes_df = auto_opt.get_current_indexes()
-            if len(indexes_df) > 0:
-                st.sidebar.write("**Current Indexes:**")
-                st.sidebar.dataframe(indexes_df)
-            else:
-                st.sidebar.info("No indexes found")
+            with conn.cursor() as cursor:
+                cursor.execute("""
+                               SELECT TABLE_NAME, INDEX_NAME, COLUMN_NAME, SEQ_IN_INDEX
+                               FROM information_schema.STATISTICS
+                               WHERE TABLE_SCHEMA = %s
+                                 AND TABLE_NAME IN ('routes', 'airports', 'airlines')
+                                 AND INDEX_NAME != 'PRIMARY'
+                               ORDER BY TABLE_NAME, INDEX_NAME, SEQ_IN_INDEX
+                               """, (DB_NAME,))
+
+                indexes = cursor.fetchall()
+                if indexes:
+                    st.sidebar.write("**Current Indexes:**")
+                    df_indexes = pd.DataFrame(indexes, columns=['Table', 'Index', 'Column', 'Position'])
+                    st.sidebar.dataframe(df_indexes)
+                else:
+                    st.sidebar.info("No indexes found")
         except Exception as e:
             st.sidebar.error(f"Error fetching indexes: {e}")
-
-# --- Data Volume Check ---
-if st.sidebar.button("📊 Check Data Volume"):
-    auto_opt = get_auto_optimizer()
-    if auto_opt:
-        try:
-            data_volume = auto_opt.check_data_volume()
-            st.sidebar.write("**Data Volume:**")
-            for table, count in data_volume.items():
-                st.sidebar.write(f"- {table}: {count:,} rows")
-        except Exception as e:
-            st.sidebar.error(f"Error checking data volume: {e}")
+        finally:
+            safe_close_connection(conn)
 
 # --- Performance Summary ---
 st.sidebar.header("About")
 st.sidebar.info(
     "This demo uses the COMPLETE OpenFlights dataset with real performance "
     "optimization. The system drops all indexes before each run and creates "
-    "strategic indexes based on query patterns using the AutoOptimizer connector."
+    "strategic indexes based on query patterns."
 )
 
 # --- Optimization Strategy Info ---
@@ -789,18 +963,12 @@ with st.sidebar.expander("🔧 Optimization Strategy"):
     - ✅ Drops ALL indexes before each run
     - ✅ Uses 10ms optimization threshold
     - ✅ 10% improvement validation
-    - ✅ Uses AutoOptimizer connector for identical logic
-    
-    **New Complex Queries:**
-    - 🛣️ **Recursive Route Pathfinding**: Finds multi-hop routes between countries
-    - 🌍 **Advanced Geographic Analysis**: Distance calculations and market analysis
-    - 📊 **Large Dataset Analysis**: Complex aggregations and subqueries
-    
+
     **Expected Performance:**
     - Complex queries: 50-90% improvement
     - Medium queries: 20-50% improvement  
     - Fast queries: Minimal improvement
-    
+
     **Data Sources:**
     - airports.dat: 7,000+ records
     - airlines.dat: 6,000+ records
