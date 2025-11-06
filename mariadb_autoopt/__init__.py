@@ -1,39 +1,18 @@
 """
-MariaDB Auto-Optimizer - Intelligent Query Optimization for MariaDB
-A machine learning-powered tool that automatically optimizes SQL queries
-by analyzing query patterns and creating strategic indexes.
+MariaDB Auto-Optimizer - Automatic query optimization for MariaDB in Pandas/Jupyter workflows.
 """
 
-__version__ = "1.0.0"
-__author__ = "MariaDB Auto-Optimizer Team"
-__description__ = "Intelligent SQL query optimization for MariaDB"
+__version__ = "0.1.0"
+__author__ = "Om"
 
-from .core import DatabaseManager, QueryOptimizer, optimize_once
-from .analyzer import QueryAnalyzer, PerformanceTracker
-from .optimizer import IndexOptimizer, QueryRewriter
-from .utils import DataLoader, VisualizationEngine
-from .connector import AutoOptimizer, OptimizationResult, AppConfig
+from .core import timed_query, optimize_once
+from .analyzer import run_explain, analyze_explain_df, parse_tables_from_query
+from .optimizer import suggest_indexes, explanation_from_issues
+from .magic import register_magic
 
-__all__ = [
-    # Core functionality
-    'DatabaseManager',
-    'QueryOptimizer',
-    'optimize_once',
-
-    # Analysis components
-    'QueryAnalyzer',
-    'PerformanceTracker',
-
-    # Optimization components
-    'IndexOptimizer',
-    'QueryRewriter',
-
-    # Utility components
-    'DataLoader',
-    'VisualizationEngine',
-
-    # NEW: Connector for integration and reusable library
-    'AutoOptimizer',
-    'OptimizationResult',
-    'AppConfig'
-]
+# Auto-register magic when imported in Jupyter
+try:
+    register_magic()
+except Exception:
+    # This might fail outside Jupyter, which is fine
+    pass
