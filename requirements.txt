@@ -1,5 +1,3 @@
-# Install the package itself (so Streamlit finds mariadb_autoopt)
--e .
 
 # Core Database & Data Processing
 pandas>=1.5.0
