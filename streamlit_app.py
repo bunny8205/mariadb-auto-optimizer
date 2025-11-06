@@ -1,15 +1,22 @@
 import os
+# Disable Streamlit file watching completely
 os.environ["STREAMLIT_SERVER_FILE_WATCHER_TYPE"] = "none"
+os.environ["STREAMLIT_SERVER_HEADLESS"] = "true"
+
+# Additional environment variables to prevent file watching
+os.environ["STREAMLIT_BROWSER_GATHER_USAGE_STATS"] = "false"
+os.environ["STREAMLIT_TELEMETRY"] = "false"
+
 import streamlit as st
 import pymysql
 import pandas as pd
 import time
-import os
 import sys
 import re
 import warnings
 import requests
 import io
+
 
 # Suppress pandas warnings
 warnings.filterwarnings('ignore', message='.*pandas only supports SQLAlchemy connectable.*')
