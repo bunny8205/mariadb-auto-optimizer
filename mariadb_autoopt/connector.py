@@ -8,16 +8,12 @@ import time
 import re
 import pandas as pd
 import warnings
+import statistics
 from contextlib import contextmanager
 from functools import lru_cache
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple, Any
 import threading
-
-# Import your existing modules
-from . import optimizer
-from . import analyzer
-from . import core
 
 # Suppress pandas warnings
 warnings.filterwarnings('ignore', message='.*pandas only supports SQLAlchemy connectable.*')
@@ -31,8 +27,8 @@ class OptimizationResult:
     improvement_percent: float
     created_indexes: List[str]
     accepted: bool
-    baseline_stats: Dict[str, float]
-    optimized_stats: Dict[str, float]
+    baseline_stats: Dict[str, Any]
+    optimized_stats: Dict[str, Any]
     query: str
 
 
@@ -44,7 +40,7 @@ class AppConfig:
     db_user: str
     db_pass: str
     db_name: str
-    optimization_threshold: float = 0.05
+    optimization_threshold: float = 0.01  # Match run_demo.py
     improvement_threshold: float = 0.10
     num_runs: int = 3
 
@@ -85,14 +81,26 @@ class AutoOptimizer:
 
     @contextmanager
     def _get_connection(self):
-        """Get database connection with pooling"""
-        if not hasattr(self._connection_local, 'conn') or not self._connection_local.conn.open:
-            self._connection_local.conn = self._create_connection()
+        """Get or create a persistent database connection (auto-reconnect safe)."""
         try:
-            yield self._connection_local.conn
-        except Exception:
+            # Check if connection exists and is open
+            if not hasattr(self._connection_local, 'conn') or self._connection_local.conn is None:
+                self._connection_local.conn = self._create_connection()
+            else:
+                try:
+                    if not self._connection_local.conn.open:
+                        self._connection_local.conn = self._create_connection()
+                except Exception:
+                    # Handle case where conn is partially closed
+                    self._connection_local.conn = self._create_connection()
+
+            conn = self._connection_local.conn
+            yield conn
+
+        except Exception as e:
+            # Force reconnection next time if this one breaks
             self._connection_local.conn = None
-            raise
+            raise ConnectionError(f"Connection context failed: {e}")
 
     def _create_connection(self):
         """Create new database connection"""
@@ -103,13 +111,26 @@ class AutoOptimizer:
                 user=self.config.db_user,
                 password=self.config.db_pass,
                 database=self.config.db_name,
-                ssl={'ssl': {}},
                 connect_timeout=10,
-                autocommit=True
+                autocommit=True,
+                charset='utf8mb4'
             )
             return conn
         except Exception as e:
             raise ConnectionError(f"Database connection failed: {e}")
+
+    @property
+    def conn(self):
+        """Direct connection access with automatic recovery."""
+        if not hasattr(self._connection_local, 'conn') or not self._connection_local.conn:
+            self._connection_local.conn = self._create_connection()
+        else:
+            try:
+                if not self._connection_local.conn.open:
+                    self._connection_local.conn = self._create_connection()
+            except Exception:
+                self._connection_local.conn = self._create_connection()
+        return self._connection_local.conn
 
     def run_query(self, query: str) -> List[Tuple]:
         """
@@ -147,7 +168,7 @@ class AutoOptimizer:
                 raise Exception(f"Could not explain query: {e}")
 
     def clear_database_cache(self) -> bool:
-        """Clear database cache for consistent benchmarking"""
+        """Clear database cache for consistent benchmarking - IDENTICAL TO run_demo.py"""
         with self._get_connection() as conn:
             try:
                 with conn.cursor() as cursor:
@@ -158,8 +179,8 @@ class AutoOptimizer:
                 warnings.warn(f"Could not clear cache: {e}")
                 return False
 
-    def run_query_with_timing(self, query: str, num_runs: int = None) -> Dict[str, Any]:
-        """Run query multiple times and return statistical results"""
+    def run_query_multiple_times(self, query: str, num_runs: int = None, clear_cache: bool = False) -> Dict[str, Any]:
+        """IDENTICAL TO run_demo.py: Run query multiple times and return statistical results"""
         if num_runs is None:
             num_runs = self.config.num_runs
 
@@ -167,6 +188,9 @@ class AutoOptimizer:
 
         with self._get_connection() as conn:
             for i in range(num_runs):
+                if clear_cache and i == 0:
+                    self.clear_database_cache()
+
                 start_time = time.time()
                 try:
                     with conn.cursor() as cursor:
@@ -181,10 +205,12 @@ class AutoOptimizer:
         if times:
             return {
                 'times': times,
-                'median': sorted(times)[len(times) // 2],
-                'mean': sum(times) / len(times),
+                'mean': statistics.mean(times),
+                'median': statistics.median(times),
                 'min': min(times),
-                'max': max(times)
+                'max': max(times),
+                'stdev': statistics.stdev(times) if len(times) > 1 else 0,
+                'rows': len(results) if 'results' in locals() else 0
             }
         return None
 
@@ -209,17 +235,18 @@ class AutoOptimizer:
         return baseline_time > threshold_seconds
 
     def validate_improvement(self, baseline_time: float, optimized_time: float, threshold: float = None) -> bool:
-        """Validate if optimization actually helped"""
+        """Validate if optimization actually helped - IDENTICAL TO run_demo.py"""
         if threshold is None:
             threshold = self.config.improvement_threshold
 
         if optimized_time >= baseline_time:
-            return False
+            return False  # No improvement or got worse
+
         improvement = (baseline_time - optimized_time) / baseline_time
-        return improvement >= threshold
+        return improvement >= threshold  # At least threshold improvement
 
     def drop_all_indexes(self) -> bool:
-        """Drop all existing indexes to simulate unoptimized database - IDENTICAL TO STREAMLIT"""
+        """Drop all existing indexes to simulate unoptimized database - IDENTICAL TO run_demo.py"""
         with self._get_connection() as conn:
             try:
                 with conn.cursor() as cursor:
@@ -239,20 +266,23 @@ class AutoOptimizer:
                             for index_name in indexes_to_drop:
                                 cursor.execute(f"ALTER TABLE {table} DROP INDEX IF EXISTS `{index_name}`")
                         else:
-                            print(f" No existing indexes found on {table}")
+                            print(f" No existing indexes found on {table} (perfect for demo!)")
 
                 return True
 
             except Exception as e:
-                raise Exception(f"Could not drop indexes: {e}")
+                warnings.warn(f"Could not drop indexes: {e}")
+                return False
 
-    def create_smart_indexes_for_query(self, query: str) -> List[str]:
-        """EXACT SAME IMPLEMENTATION AS STREAMLIT APP"""
-        created_indexes = []
+    def get_actual_columns_from_query(self, query: str) -> List[Tuple[str, str]]:
+        """IDENTICAL TO run_demo.py: Enhanced column extraction with table alias resolution"""
+        actual_columns = []
         query_lower = query.lower()
 
-        # Use the same alias resolution as your local demo
+        # First, map table aliases to real table names
         table_aliases = {}
+
+        # Pattern to find table aliases: "FROM table alias" or "JOIN table alias"
         alias_patterns = [
             r'from\s+(\w+)\s+(\w+)',
             r'join\s+(\w+)\s+(\w+)',
@@ -266,13 +296,14 @@ class AutoOptimizer:
                 table_name, alias = match.groups()
                 table_aliases[alias] = table_name
 
-        # Extract columns with proper alias resolution
-        actual_columns = []
+        # Now extract columns with proper table resolution
         column_patterns = [
             r'where\s+(\w+)\.(\w+)\s*[=<>!]',
             r'join\s+\w+\s+on\s+(\w+)\.(\w+)\s*=\s*\w+\.\w+',
             r'group by\s+(\w+)\.(\w+)',
             r'order by\s+(\w+)\.(\w+)',
+            r'having\s+\w+\s+[=<>!]\s*\w+\.(\w+)',
+            r'select.*?(\w+)\.(\w+)\s+as',
             r'on\s+(\w+)\.(\w+)\s*=\s*\w+\.\w+'
         ]
 
@@ -280,34 +311,42 @@ class AutoOptimizer:
             matches = re.finditer(pattern, query_lower)
             for match in matches:
                 table_ref, column = match.groups()
-                # Resolve alias
+
+                # Resolve alias to real table name
                 actual_table = table_aliases.get(table_ref, table_ref)
 
-                # Map aliases to real tables
-                if actual_table in ['r', 'routes']:
-                    actual_table = 'routes'
-                elif actual_table in ['a', 'airports']:
-                    actual_table = 'airports'
-                elif actual_table in ['al', 'airlines']:
-                    actual_table = 'airlines'
-                elif actual_table in ['src', 'source']:
-                    actual_table = 'airports'
-                elif actual_table in ['dest', 'destination']:
-                    actual_table = 'airports'
-                elif actual_table in ['r2', 'r3', 'r4', 'r5']:
-                    continue  # Skip subquery aliases
+                # Only include if it's a real table (not a subquery alias)
+                real_tables = ['routes', 'airports', 'airlines', 'r', 'a', 'al', 'src', 'dest']
+                if actual_table in real_tables:
+                    # Map common aliases to real tables
+                    if actual_table == 'r':
+                        actual_table = 'routes'
+                    elif actual_table == 'a':
+                        actual_table = 'airports'
+                    elif actual_table == 'al':
+                        actual_table = 'airlines'
+                    elif actual_table == 'src':
+                        actual_table = 'airports'
+                    elif actual_table == 'dest':
+                        actual_table = 'airports'
 
-                # Only include real tables
-                if actual_table in ['routes', 'airports', 'airlines']:
                     actual_columns.append((actual_table, column))
 
-        # Remove duplicates
-        actual_columns = list(set(actual_columns))
+        # Remove duplicates and return
+        return list(set(actual_columns))
 
-        if actual_columns:
-            print(f"🔍 Found indexable columns: {actual_columns}")
+    def create_smart_indexes(self, query: str) -> List[str]:
+        """IDENTICAL TO run_demo.py: Create indexes based on actual query patterns with table validation"""
+        actual_columns = self.get_actual_columns_from_query(query)
+        created_indexes = []
 
-        # Group by table and create indexes (matching your local strategy)
+        print(f" Found {len(actual_columns)} relevant columns in query")
+
+        if not actual_columns:
+            print("    No indexable columns found in query")
+            return created_indexes
+
+        # Group columns by table
         columns_by_table = {}
         for table, column in actual_columns:
             if table not in columns_by_table:
@@ -315,51 +354,159 @@ class AutoOptimizer:
             if column not in columns_by_table[table]:
                 columns_by_table[table].append(column)
 
-        # Create indexes matching your successful local strategy
+        # Validate tables exist and get their actual columns
+        valid_tables = {}
         with self._get_connection() as conn:
-            for table, columns in columns_by_table.items():
-                if not columns:
-                    continue
-
-                print(f"**Creating indexes for table `{table}`:**")
-
-                # Create composite indexes for 2+ columns (like local demo)
-                if len(columns) >= 2:
-                    idx_name = f"idx_{table}_composite_{'_'.join(columns[:2])}"
-                    composite_cols = ', '.join(columns[:2])
-                    sql = f"CREATE INDEX {idx_name} ON {table} ({composite_cols})"
-
+            with conn.cursor() as cursor:
+                for table in columns_by_table.keys():
                     try:
+                        cursor.execute(f"SHOW COLUMNS FROM {table}")
+                        valid_columns = [row[0] for row in cursor.fetchall()]
+                        valid_tables[table] = valid_columns
+                        print(f"    Table {table} has {len(valid_columns)} columns")
+                    except Exception as e:
+                        print(f"    Table {table} doesn't exist: {e}")
+
+        # Create strategic indexes only for valid tables/columns
+        for table, columns in columns_by_table.items():
+            if table not in valid_tables:
+                print(f"    Skipping {table} - table not found")
+                continue
+
+            valid_columns = [col for col in columns if col in valid_tables[table]]
+
+            if not valid_columns:
+                print(f"   No valid columns found for table {table}")
+                continue
+
+            print(f"    Creating indexes for {table}: {valid_columns}")
+
+            # Create composite index for multiple columns
+            if len(valid_columns) >= 2:
+                idx_name = f"idx_{table}_composite_{'_'.join(valid_columns[:2])}"
+                composite_cols = ', '.join(valid_columns[:2])
+                sql = f"CREATE INDEX {idx_name} ON {table} ({composite_cols})"
+
+                try:
+                    with self._get_connection() as conn:
                         with conn.cursor() as cursor:
                             cursor.execute(sql)
-                        created_indexes.append(idx_name)
-                        print(f"✓ Composite index: `{idx_name}`")
-                    except Exception as e:
-                        if "Duplicate key name" not in str(e):
-                            warnings.warn(f"Failed to create index {idx_name}: {e}")
+                    created_indexes.append(idx_name)
+                    print(f"    Created composite index: {idx_name}")
+                except Exception as e:
+                    if "Duplicate key name" not in str(e):
+                        print(f"   ️ Failed to create index {idx_name}: {e}")
 
-                # Create single-column indexes for important columns
-                for column in columns:
-                    if column in ['country', 'city', 'active', 'airline_id', 'source_airport_id',
-                                 'dest_airport_id', 'stops', 'name', 'airport_id']:
-                        idx_name = f"idx_{table}_{column}"
-                        sql = f"CREATE INDEX {idx_name} ON {table} ({column})"
+            # Also create single-column indexes for important columns
+            for column in valid_columns:
+                if column in ['country', 'city', 'stops', 'active', 'source_airport_id', 'dest_airport_id', 'airline_id']:
+                    idx_name = f"idx_{table}_{column}"
+                    sql = f"CREATE INDEX {idx_name} ON {table} ({column})"
 
-                        try:
+                    try:
+                        with self._get_connection() as conn:
                             with conn.cursor() as cursor:
                                 cursor.execute(sql)
-                            created_indexes.append(idx_name)
-                            print(f"✓ Single-column index: `{idx_name}`")
-                        except Exception as e:
-                            if "Duplicate key name" not in str(e):
-                                warnings.warn(f"Failed to create index {idx_name}: {e}")
+                        created_indexes.append(idx_name)
+                        print(f"    Created single-column index: {idx_name}")
+                    except Exception as e:
+                        if "Duplicate key name" not in str(e):
+                            print(f"    Failed to create index {idx_name}: {e}")
 
         return created_indexes
 
+    def enhanced_optimization_strategy(self, query: str) -> str:
+        """IDENTICAL TO run_demo.py: Enhanced strategy that focuses on actual performance bottlenecks"""
+        size_label, rows = self.detect_table_size("routes")
+        query_type = self.detect_query_type(query)
+        cost = self.get_query_cost(query)
+
+        print(f"\n Table Size: {rows:,} rows ({size_label})")
+        print(f" Query Type: {query_type}")
+        print(f" Estimated Query Cost: {cost:.1f}")
+
+        # More conservative strategy
+        if size_label == "small" or cost < 50:
+            print(" Mode: Analysis Only (query already efficient)")
+            return "analyze_only"
+        elif query_type == "join" and rows > 10000:
+            print(" Mode: Join Optimization (focus on foreign keys)")
+            return "join_optimize"
+        elif query_type == "aggregation" and "GROUP BY" in query.upper():
+            print(" Mode: Aggregation Optimization (group by indexes)")
+            return "aggregation_optimize"
+        elif cost > 1000:
+            print(" Mode: Critical Optimization (high-cost query)")
+            return "critical_optimize"
+        else:
+            print("⚡ Mode: Selective Optimization (targeted indexes)")
+            return "selective_optimize"
+
+    def detect_table_size(self, table_name: str = "routes") -> Tuple[str, int]:
+        """IDENTICAL TO run_demo.py: Detect total row count and classify table size"""
+        try:
+            with self._get_connection() as conn:
+                with conn.cursor() as cursor:
+                    cursor.execute(f"SELECT COUNT(*) FROM {table_name}")
+                    rows = cursor.fetchone()[0]
+
+            # Dynamic thresholds based on typical performance characteristics
+            if rows < 50_000:
+                return "small", rows
+            elif rows < 500_000:
+                return "medium", rows
+            else:
+                return "large", rows
+        except Exception as e:
+            print(f" Could not detect table size: {e}")
+            return "unknown", 0
+
+    def detect_query_type(self, query: str) -> str:
+        """IDENTICAL TO run_demo.py: Infer query type from SQL keywords"""
+        q = query.lower()
+        if "join" in q:
+            return "join"
+        elif "group by" in q:
+            return "aggregation"
+        elif "where" in q:
+            return "filter"
+        else:
+            return "simple"
+
+    def get_query_cost(self, query: str) -> float:
+        """IDENTICAL TO run_demo.py: Get query cost from MariaDB's optimizer estimates"""
+        try:
+            with self._get_connection() as conn:
+                with conn.cursor() as cursor:
+                    # Try to get cost from EXPLAIN FORMAT=JSON
+                    cursor.execute(f"EXPLAIN FORMAT=JSON {query}")
+                    result = cursor.fetchone()
+                    if result and result[0]:
+                        import json
+                        explain_data = json.loads(result[0])
+                        cost = explain_data.get('query_block', {}).get('cost_info', {}).get('query_cost', None)
+                        if cost:
+                            return float(cost)
+        except Exception as e:
+            print(f" Could not get query cost: {e}")
+
+        # Fallback: estimate cost based on table size and query complexity
+        size_label, rows = self.detect_table_size()
+        base_cost = rows / 1000  # Simple heuristic
+
+        # Adjust based on query complexity
+        if "join" in query.lower():
+            base_cost *= 2
+        if "group by" in query.lower():
+            base_cost *= 1.5
+        if "order by" in query.lower():
+            base_cost *= 1.2
+
+        return base_cost
+
     def optimize_query(self, query: str, improvement_threshold: float = None) -> OptimizationResult:
         """
-        Main optimization method - automatically optimizes a query
-        IDENTICAL LOGIC TO STREAMLIT APP
+        Main optimization method - UPDATED TO MATCH run_demo.py LOGIC EXACTLY
 
         Args:
             query: SQL query to optimize
@@ -373,34 +520,86 @@ class AutoOptimizer:
 
         print("🚀 Starting query optimization...")
 
-        # Step 1: Drop all existing indexes
-        print("🔧 Step 1: Preparing database (dropping existing indexes)...")
-        self.drop_all_indexes()
+        # Step 1: Use enhanced strategy (like run_demo.py)
+        strategy = self.enhanced_optimization_strategy(query)
 
-        # Step 2: Baseline performance
+        if strategy == "analyze_only":
+            print(" Analysis only - no indexes created")
+            baseline_stats = self.run_query_multiple_times(query, num_runs=3, clear_cache=True)
+            return OptimizationResult(
+                baseline_time=baseline_stats['median'],
+                optimized_time=baseline_stats['median'],
+                improvement_percent=0,
+                created_indexes=[],
+                accepted=False,
+                baseline_stats=baseline_stats,
+                optimized_stats=baseline_stats,
+                query=query
+            )
+
+        # Step 2: Baseline performance with cache clearing
         print("📊 Step 2: Measuring baseline performance...")
-        self.clear_database_cache()
-        baseline_stats = self.run_query_with_timing(query)
+        baseline_stats = self.run_query_multiple_times(query, num_runs=3, clear_cache=True)
 
-        # Step 3: Create indexes
+        # Only optimize if query is slow enough to benefit (adjustable threshold)
+        if baseline_stats['median'] < self.config.optimization_threshold:
+            print(f"⚡ Query already fast (<{self.config.optimization_threshold}s) - skipping optimization")
+            return OptimizationResult(
+                baseline_time=baseline_stats['median'],
+                optimized_time=baseline_stats['median'],
+                improvement_percent=0,
+                created_indexes=[],
+                accepted=False,
+                baseline_stats=baseline_stats,
+                optimized_stats=baseline_stats,
+                query=query
+            )
+
+        print(f" Baseline (median): {baseline_stats['median']:.3f}s")
+
+        # Step 3: Create smart indexes
         print("🔧 Step 3: Creating optimized indexes...")
-        created_indexes = self.create_smart_indexes_for_query(query)
+        created_indexes = self.create_smart_indexes(query)
 
-        # Step 4: Optimized performance
+        if not created_indexes:
+            print(" No relevant indexes to create")
+            return OptimizationResult(
+                baseline_time=baseline_stats['median'],
+                optimized_time=baseline_stats['median'],
+                improvement_percent=0,
+                created_indexes=[],
+                accepted=False,
+                baseline_stats=baseline_stats,
+                optimized_stats=baseline_stats,
+                query=query
+            )
+
+        # Step 4: Optimized performance with cache clearing
         print("📊 Step 4: Measuring optimized performance...")
-        self.clear_database_cache()
-        optimized_stats = self.run_query_with_timing(query)
+        optimized_stats = self.run_query_multiple_times(query, num_runs=3, clear_cache=True)
+
+        print(f" Optimized (median): {optimized_stats['median']:.3f}s")
 
         # Step 5: Calculate improvement
         improvement_percent = ((baseline_stats['median'] - optimized_stats['median']) / baseline_stats['median']) * 100
+
+        # Validate improvement (identical to run_demo.py)
         accepted = self.validate_improvement(baseline_stats['median'], optimized_stats['median'], improvement_threshold)
+
+        if accepted:
+            print(f" VALIDATED: {improvement_percent:.1f}% improvement")
+        else:
+            print(f"  INSUFFICIENT: {improvement_percent:.1f}% improvement (below threshold)")
+            # Roll back indexes
+            self.cleanup_indexes(created_indexes)
+            created_indexes = []
 
         print("✅ Optimization complete!")
 
         return OptimizationResult(
             baseline_time=baseline_stats['median'],
-            optimized_time=optimized_stats['median'],
-            improvement_percent=improvement_percent,
+            optimized_time=optimized_stats['median'] if accepted else baseline_stats['median'],
+            improvement_percent=improvement_percent if accepted else 0,
             created_indexes=created_indexes,
             accepted=accepted,
             baseline_stats=baseline_stats,
@@ -409,22 +608,24 @@ class AutoOptimizer:
         )
 
     def cleanup_indexes(self, index_list: List[str]) -> None:
-        """Clean up created indexes - IDENTICAL TO STREAMLIT"""
+        """Clean up created indexes - IDENTICAL TO run_demo.py"""
         if not index_list:
             return
 
+        print(f"\n🧹 Cleaning up {len(index_list)} indexes...")
         with self._get_connection() as conn:
             for index_spec in index_list:
                 try:
+                    # Extract table and index name
                     if "idx_" in index_spec:
                         parts = index_spec.split('_')
                         table = parts[1] if len(parts) > 1 else None
                         if table:
                             with conn.cursor() as cursor:
                                 cursor.execute(f"ALTER TABLE {table} DROP INDEX IF EXISTS `{index_spec}`")
-                            print(f"Cleaned up: {index_spec}")
+                            print(f"    Cleaned up: {index_spec}")
                 except Exception as e:
-                    warnings.warn(f"Failed to clean up {index_spec}: {e}")
+                    print(f"   ️ Failed to clean up {index_spec}: {e}")
 
     @lru_cache(maxsize=32)
     def check_data_volume(self) -> Dict[str, int]:
@@ -462,12 +663,15 @@ class AutoOptimizer:
                 raise Exception(f"Error fetching indexes: {e}")
 
     def close(self):
-        """Close connection"""
+        """Close connection safely."""
         if hasattr(self._connection_local, 'conn') and self._connection_local.conn:
-            self._connection_local.conn.close()
+            try:
+                self._connection_local.conn.close()
+            except Exception:
+                pass
             self._connection_local.conn = None
 
-    # Demo queries identical to Streamlit app
+    # Demo queries identical to run_demo.py
     DEMO_QUERIES = {
         "Complex Aggregation": """
             SELECT a.country, 
