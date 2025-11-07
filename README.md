@@ -20,9 +20,6 @@
 
 ---
 
-## 🌐 Live Streamlit Demo
-🚀 **Experience the optimizer in your browser:**  
-➡️ [MariaDB Auto-Optimizer Streamlit App](https://mariadb-auto-optimizer-jwdqkjm38sthdbrzhzcp4t.streamlit.app/)
 
 ---
 
