@@ -20,6 +20,17 @@
 
 ---
 
+## 🔗 Integration with MariaDB Jupyter Kernel
+
+MariaDB Auto-Optimizer now extends the official [MariaDB Jupyter Kernel](https://github.com/mariadb-corporation/mariadb_kernel)
+by providing the `%%mariadb_opt` magic command.
+
+### Usage
+```python
+%load_ext mariadb_autoopt.magic
+
+%%mariadb_opt
+SELECT * FROM routes WHERE stops = 0;
 
 ---
 
