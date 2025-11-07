@@ -32,37 +32,23 @@ else:
 
 # --- Connect Function ---
 def get_connection():
-    """Create a MariaDB connection with SSL fallback and short timeout."""
+    """Create a MariaDB connection with short timeout (no SSL first)."""
     try:
-        # First attempt (with SSL)
         conn = pymysql.connect(
             host=DB_HOST,
             port=DB_PORT,
             user=DB_USER,
             password=DB_PASS,
             database=DB_NAME,
-            ssl={'ssl': {}},
             connect_timeout=5,
             autocommit=True
         )
+        st.info("✅ Connected successfully without SSL.")
         return conn
     except Exception as e:
-        st.warning(f"⚠️ SSL connection failed ({e}), retrying without SSL...")
-        try:
-            conn = pymysql.connect(
-                host=DB_HOST,
-                port=DB_PORT,
-                user=DB_USER,
-                password=DB_PASS,
-                database=DB_NAME,
-                connect_timeout=5,
-                autocommit=True
-            )
-            st.info("✅ Connected successfully without SSL.")
-            return conn
-        except Exception as e2:
-            st.error(f"❌ Database connection failed: {e2}")
-            return None
+        st.error(f"❌ Database connection failed: {e}")
+        return None
+
 
 def clear_database_cache(conn):
     """Clear database cache for consistent benchmarking"""
