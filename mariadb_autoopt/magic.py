@@ -1,7 +1,17 @@
+"""
+MariaDB Auto-Optimizer Jupyter Magic
+Extends the official MariaDB Jupyter Kernel with adaptive SQL optimization capabilities.
+"""
+
 from IPython.core.magic import register_cell_magic
 from IPython.display import display
 import matplotlib.pyplot as plt
 import shlex
+import json
+
+__version__ = "1.0.0"
+__author__ = "Om Shree Gyanraj"
+__description__ = "MariaDB Auto-Optimizer magic for adaptive SQL optimization inside Jupyter"
 
 
 def register_magic():
@@ -15,14 +25,39 @@ def register_magic():
         Usage:
         %%mariadb_opt conn=conn auto_apply=False
         SELECT * FROM table WHERE condition;
+
+        Examples:
+        %%mariadb_opt conn=my_conn
+        SELECT * FROM users WHERE email = 'test@example.com';
+
+        %%mariadb_opt conn=db auto_apply=true
+        SELECT * FROM orders WHERE date > '2023-01-01';
+
+        %%mariadb_opt conn=conn auto_apply=false config='{\"max_indexes\": 3}'
+        SELECT * FROM large_table WHERE category = 'A' AND status = 'active';
         """
+        # Help command
+        if line.strip() in ('-h', '--help', 'help'):
+            print(__doc__)
+            return
+
         try:
             # Parse arguments
             args = {}
+            config = {}
             for token in shlex.split(line):
                 if '=' in token:
                     key, value = token.split('=', 1)
                     args[key] = value
+
+            # Parse config if provided
+            if 'config' in args:
+                try:
+                    config = json.loads(args['config'])
+                except json.JSONDecodeError as e:
+                    print(f"⚠️  Invalid config JSON: {args['config']}")
+                    print(f"💡 Error: {str(e)}")
+                    return
 
             # Get connection - FIXED: Use get_ipython() to access user namespace
             from IPython import get_ipython
@@ -38,11 +73,15 @@ def register_magic():
             # Get auto_apply flag
             auto_apply = args.get('auto_apply', 'false').lower() in ('true', '1', 'yes', 'y')
 
+            print("🔗 [Integration] MariaDB Auto-Optimizer linked successfully with Jupyter Kernel environment.")
+
             # Import here to avoid circular imports
             from mariadb_autoopt.core import optimize_once
 
             # Run optimization
-            result = optimize_once(conn, cell.strip(), auto_apply=auto_apply)
+            result = optimize_once(conn, cell.strip(), auto_apply=auto_apply, config=config)
+
+            print("📦 [Integration] Optimization completed — results available to MariaDB Kernel or notebook context.")
 
             # Display results
             print("=" * 60)
@@ -64,6 +103,12 @@ def register_magic():
             if result['applied_indexes']:
                 print(f"\n🔧 APPLIED CHANGES")
                 for idx in result['applied_indexes']:
+                    print(f"   • {idx}")
+
+            # Show suggested indexes if not applied
+            if result.get('suggested_indexes') and not auto_apply:
+                print(f"\n💡 SUGGESTED INDEXES (not applied - use auto_apply=true to apply)")
+                for idx in result['suggested_indexes']:
                     print(f"   • {idx}")
 
             if result['after_time'] is not None:
@@ -92,19 +137,29 @@ def register_magic():
                 plt.tight_layout()
                 plt.show()
 
+            # Optional: Query plan comparison
+            if result.get('before_plan') and result.get('after_plan'):
+                print(f"\n📊 QUERY PLAN COMPARISON")
+                print("   Use result['before_plan'] and result['after_plan'] to analyze execution plans")
+
+        except ImportError as e:
+            print(f"❌ Missing dependency: {str(e)}")
+            print("💡 Try: pip install mariadb-auto-optimizer")
         except Exception as e:
             print(f"❌ Error: {str(e)}")
             print("\n💡 Make sure you have:")
             print("   - A MariaDB connection variable (default: 'conn')")
             print("   - The query is valid SQL")
             print("   - You have necessary permissions")
+            import traceback
+            traceback.print_exc()
 
 
 # Alternative function-based approach
-def optimize_and_show(conn, query, auto_apply=False):
+def optimize_and_show(conn, query, auto_apply=False, config=None):
     """Function-based alternative to cell magic."""
     from mariadb_autoopt.core import optimize_once
-    result = optimize_once(conn, query, auto_apply=auto_apply)
+    result = optimize_once(conn, query, auto_apply=auto_apply, config=config or {})
 
     print("📊 Optimization Results:")
     print(f"Before: {result['before_time']:.3f}s")
@@ -116,3 +171,30 @@ def optimize_and_show(conn, query, auto_apply=False):
 
     print(f"\n{result['explanation']}")
     return result
+
+
+def load_ipython_extension(ipython):
+    """
+    Jupyter looks for this function to auto-load the magic
+    when users run: %load_ext mariadb_autoopt.magic
+    or when the extension is integrated into the MariaDB kernel.
+    """
+    register_magic()
+    print("✅ MariaDB Auto-Optimizer magic registered successfully as %%mariadb_opt")
+
+
+def auto_register():
+    """
+    Auto-registers the magic when imported (for MariaDB Jupyter Kernel).
+    """
+    try:
+        from IPython import get_ipython
+        ipython = get_ipython()
+        if ipython:
+            load_ipython_extension(ipython)
+    except Exception as e:
+        print(f"⚠️ Auto-registration skipped: {e}")
+
+
+# Auto-register when imported in Jupyter environment
+auto_register()
