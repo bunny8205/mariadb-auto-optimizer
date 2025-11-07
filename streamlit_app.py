@@ -19,30 +19,50 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from mariadb_autoopt import optimizer  # ✅ Use your existing modules
 
-# --- Database Connection Setup ---
-DB_HOST = os.getenv("AUTOOPT_DB_HOST", "serverless-us-central1.sysp0000.db2.skysql.com")
-DB_PORT = int(os.getenv("AUTOOPT_DB_PORT", "4038"))
-DB_USER = os.getenv("AUTOOPT_DB_USER", "dbpgf17821108")
-DB_PASS = os.getenv("AUTOOPT_DB_PASS", "Rn@08022005")
-DB_NAME = os.getenv("AUTOOPT_DB_NAME", "autoopt_db")
+# --- Secure Database Connection Setup (uses Streamlit Secrets) ---
+if "AUTOOPT_DB_HOST" in st.secrets:
+    DB_HOST = st.secrets["AUTOOPT_DB_HOST"]
+    DB_PORT = int(st.secrets["AUTOOPT_DB_PORT"])
+    DB_USER = st.secrets["AUTOOPT_DB_USER"]
+    DB_PASS = st.secrets["AUTOOPT_DB_PASS"]
+    DB_NAME = st.secrets["AUTOOPT_DB_NAME"]
+else:
+    st.error("❌ Database secrets not found. Please set them in Streamlit Cloud → Settings → Secrets.")
+    st.stop()
 
 # --- Connect Function ---
 def get_connection():
+    """Create a MariaDB connection with SSL fallback and short timeout."""
     try:
+        # First attempt (with SSL)
         conn = pymysql.connect(
-            host=DB_HOST, 
-            port=DB_PORT, 
+            host=DB_HOST,
+            port=DB_PORT,
             user=DB_USER,
-            password=DB_PASS, 
-            database=DB_NAME, 
+            password=DB_PASS,
+            database=DB_NAME,
             ssl={'ssl': {}},
-            connect_timeout=10,
-            autocommit=True  # Better transaction handling
+            connect_timeout=5,
+            autocommit=True
         )
         return conn
     except Exception as e:
-        st.error(f"❌ Database connection failed: {e}")
-        return None
+        st.warning(f"⚠️ SSL connection failed ({e}), retrying without SSL...")
+        try:
+            conn = pymysql.connect(
+                host=DB_HOST,
+                port=DB_PORT,
+                user=DB_USER,
+                password=DB_PASS,
+                database=DB_NAME,
+                connect_timeout=5,
+                autocommit=True
+            )
+            st.info("✅ Connected successfully without SSL.")
+            return conn
+        except Exception as e2:
+            st.error(f"❌ Database connection failed: {e2}")
+            return None
 
 def clear_database_cache(conn):
     """Clear database cache for consistent benchmarking"""
@@ -630,18 +650,24 @@ def check_database_tables(conn):
         return False
 
 # Check database status
-conn = None
-try:
-    conn = get_connection()
-    if conn:
-        db_ready = check_database_tables(conn)
-        # Check data volume
-        table_counts = check_data_volume(conn)
-    else:
-        db_ready = False
-        table_counts = {}
-finally:
-    safe_close_connection(conn)
+st.sidebar.write("⚙️ Connect to your MariaDB instance to begin.")
+if st.sidebar.button("🔗 Connect to Database"):
+    with st.spinner("Connecting to MariaDB..."):
+        conn = get_connection()
+        if conn:
+            db_ready = check_database_tables(conn)
+            table_counts = check_data_volume(conn)
+            safe_close_connection(conn)
+            if db_ready:
+                st.sidebar.success("✅ Connection successful!")
+            else:
+                st.sidebar.warning("⚠️ Connected, but required tables not found.")
+        else:
+            st.sidebar.error("❌ Could not connect to database.")
+    st.rerun()
+else:
+    db_ready = False
+    table_counts = {}
 
 # Show current data volume
 if db_ready and table_counts:
