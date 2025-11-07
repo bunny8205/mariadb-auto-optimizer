@@ -655,17 +655,19 @@ def check_database_tables(conn):
         return False
 
 # Check database status automatically on startup
-@st.cache_resource(ttl=300)  # Cache connection for 5 minutes
 def initialize_database():
     """Automatically connect and initialize database on startup"""
+    st.write("🚀 Running initialize_database()...")  # debug output
     with st.spinner("🔗 Connecting to MariaDB and checking database..."):
         conn = get_connection()
         if conn:
+            st.write("✅ Connection successful inside initialize_database()")
             db_ready = check_database_tables(conn)
             table_counts = check_data_volume(conn)
             safe_close_connection(conn)
             return db_ready, table_counts
         else:
+            st.error("❌ Connection failed inside initialize_database()")
             return False, {}
 
 # Auto-initialize database on startup
