@@ -649,28 +649,26 @@ def check_database_tables(conn):
         st.error(f"Error checking tables: {e}")
         return False
 
-# Check database status
-st.sidebar.write("⚙️ Connect to your MariaDB instance to begin.")
-if st.sidebar.button("🔗 Connect to Database"):
-    with st.spinner("Connecting to MariaDB..."):
+# Check database status automatically on startup
+@st.cache_resource(ttl=300)  # Cache connection for 5 minutes
+def initialize_database():
+    """Automatically connect and initialize database on startup"""
+    with st.spinner("🔗 Connecting to MariaDB and checking database..."):
         conn = get_connection()
         if conn:
             db_ready = check_database_tables(conn)
             table_counts = check_data_volume(conn)
             safe_close_connection(conn)
-            if db_ready:
-                st.sidebar.success("✅ Connection successful!")
-            else:
-                st.sidebar.warning("⚠️ Connected, but required tables not found.")
+            return db_ready, table_counts
         else:
-            st.sidebar.error("❌ Could not connect to database.")
-    st.rerun()
-else:
-    db_ready = False
-    table_counts = {}
+            return False, {}
+
+# Auto-initialize database on startup
+db_ready, table_counts = initialize_database()
 
 # Show current data volume
 if db_ready and table_counts:
+    st.sidebar.success("✅ Database connected successfully!")
     st.sidebar.write("**Current Data Volume:**")
     for table, count in table_counts.items():
         st.sidebar.write(f"- {table}: {count:,} rows")
@@ -683,6 +681,7 @@ if db_ready and table_counts:
         st.sidebar.success("✅ Full dataset loaded!")
         load_full_data = False
 else:
+    st.sidebar.error("❌ Database connection failed or tables not found")
     load_full_data = st.sidebar.button("🔄 Load Complete OpenFlights Dataset")
 
 if load_full_data:
@@ -691,6 +690,8 @@ if load_full_data:
         try:
             if load_complete_openflights_data(conn):
                 st.success("✅ Complete OpenFlights dataset loaded successfully!")
+                # Clear cache to force re-initialization
+                st.cache_resource.clear()
                 st.rerun()
             else:
                 st.error("❌ Failed to load OpenFlights dataset")
