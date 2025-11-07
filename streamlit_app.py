@@ -32,41 +32,23 @@ else:
 
 # --- Connect Function ---
 def get_connection():
-    """Connect to SkySQL with automatic SSL fallback."""
-    import pymysql
-    import streamlit as st
-
+    """Connect to SkySQL (no SSL for local Streamlit testing)."""
     try:
-        st.write("🔗 Connecting securely to SkySQL (SSL enabled)...")
+        st.write("🔗 Connecting to SkySQL (non-SSL)...")
         conn = pymysql.connect(
             host=st.secrets["AUTOOPT_DB_HOST"],
             port=int(st.secrets["AUTOOPT_DB_PORT"]),
             user=st.secrets["AUTOOPT_DB_USER"],
             password=st.secrets["AUTOOPT_DB_PASS"],
             database=st.secrets["AUTOOPT_DB_NAME"],
-            ssl={"ssl": {}},  # ✅ Force SSL handshake
-            connect_timeout=8,
+            connect_timeout=5,
             autocommit=True
         )
-        st.success("✅ Secure connection established with SkySQL!")
+        st.success("✅ Connected to SkySQL successfully (non-SSL).")
         return conn
     except Exception as e:
-        st.warning(f"⚠️ SSL connection failed ({e}), retrying without SSL...")
-        try:
-            conn = pymysql.connect(
-                host=st.secrets["AUTOOPT_DB_HOST"],
-                port=int(st.secrets["AUTOOPT_DB_PORT"]),
-                user=st.secrets["AUTOOPT_DB_USER"],
-                password=st.secrets["AUTOOPT_DB_PASS"],
-                database=st.secrets["AUTOOPT_DB_NAME"],
-                connect_timeout=8,
-                autocommit=True
-            )
-            st.info("✅ Connected successfully (non-SSL fallback).")
-            return conn
-        except Exception as e2:
-            st.error(f"❌ Database connection failed: {e2}")
-            return None
+        st.error(f"❌ Database connection failed: {e}")
+        return None
 
 
 def clear_database_cache(conn):
