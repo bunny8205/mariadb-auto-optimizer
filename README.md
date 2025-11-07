@@ -4,7 +4,7 @@
 ![Python](https://img.shields.io/badge/Python-3.8%2B-brightgreen.svg)
 ![MariaDB](https://img.shields.io/badge/MariaDB-10.5%2B-orange.svg)
 ![Jupyter](https://img.shields.io/badge/Jupyter-Notebook-orange.svg)
-![Streamlit](https://img.shields.io/badge/Streamlit-App-red.svg)
+
 
 ---
 
