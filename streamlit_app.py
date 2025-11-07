@@ -23,7 +23,7 @@ from mariadb_autoopt import optimizer  # ✅ Use your existing modules
 DB_HOST = os.getenv("AUTOOPT_DB_HOST", "serverless-us-central1.sysp0000.db2.skysql.com")
 DB_PORT = int(os.getenv("AUTOOPT_DB_PORT", "4038"))
 DB_USER = os.getenv("AUTOOPT_DB_USER", "dbpgf17821108")
-DB_PASS = os.getenv("AUTOOPT_DB_PASS", "Rn@08022005")
+DB_PASS = os.getenv("AUTOOPT_DB_PASS", "Rn@0802205")
 DB_NAME = os.getenv("AUTOOPT_DB_NAME", "autoopt_db")
 
 # --- Connect Function ---
