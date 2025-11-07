@@ -126,6 +126,7 @@ mariadb-auto-optimizer/
 ├── mariadb_autoopt/              # Main package source code
 │   ├── __init__.py
 │   ├── analyzer.py
+│   ├── connector.py             # Database connection utilities
 │   ├── core.py
 │   ├── magic.py
 │   └── optimizer.py
@@ -133,8 +134,8 @@ mariadb-auto-optimizer/
 ├── README.md
 ├── requirements.txt
 ├── run_demo.py                   # Automated script demo (main repository)
-└── setup_demo.py                 # Quick setup script
-```
+├── setup.py                      # Package installation script
+└── setup_demo.py                 # Quick setup script```
 
 ## 🚀 Quick Start (5 Minutes)
 
@@ -150,6 +151,10 @@ venv\Scripts\activate       # Windows
 
 # Install dependencies
 pip install -r requirements.txt
+
+# Install the package in development mode
+pip install -e .
+
 ```
 
 ### 2. Choose Your Demo Method
