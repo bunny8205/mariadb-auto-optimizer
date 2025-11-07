@@ -32,22 +32,41 @@ else:
 
 # --- Connect Function ---
 def get_connection():
-    """Create a MariaDB connection with short timeout (no SSL first)."""
+    """Connect to SkySQL with automatic SSL fallback."""
+    import pymysql
+    import streamlit as st
+
     try:
+        st.write("🔗 Connecting securely to SkySQL (SSL enabled)...")
         conn = pymysql.connect(
-            host=DB_HOST,
-            port=DB_PORT,
-            user=DB_USER,
-            password=DB_PASS,
-            database=DB_NAME,
-            connect_timeout=5,
+            host=st.secrets["AUTOOPT_DB_HOST"],
+            port=int(st.secrets["AUTOOPT_DB_PORT"]),
+            user=st.secrets["AUTOOPT_DB_USER"],
+            password=st.secrets["AUTOOPT_DB_PASS"],
+            database=st.secrets["AUTOOPT_DB_NAME"],
+            ssl={"ssl": {}},  # ✅ Force SSL handshake
+            connect_timeout=8,
             autocommit=True
         )
-        st.info("✅ Connected successfully without SSL.")
+        st.success("✅ Secure connection established with SkySQL!")
         return conn
     except Exception as e:
-        st.error(f"❌ Database connection failed: {e}")
-        return None
+        st.warning(f"⚠️ SSL connection failed ({e}), retrying without SSL...")
+        try:
+            conn = pymysql.connect(
+                host=st.secrets["AUTOOPT_DB_HOST"],
+                port=int(st.secrets["AUTOOPT_DB_PORT"]),
+                user=st.secrets["AUTOOPT_DB_USER"],
+                password=st.secrets["AUTOOPT_DB_PASS"],
+                database=st.secrets["AUTOOPT_DB_NAME"],
+                connect_timeout=8,
+                autocommit=True
+            )
+            st.info("✅ Connected successfully (non-SSL fallback).")
+            return conn
+        except Exception as e2:
+            st.error(f"❌ Database connection failed: {e2}")
+            return None
 
 
 def clear_database_cache(conn):
